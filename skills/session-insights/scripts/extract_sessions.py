@@ -26,72 +26,27 @@ should be done by the calling agent/LLM using this data as evidence.
 """
 import argparse
 import collections
-import hashlib
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
 
-SESSIONS_ROOT = Path.home() / ".pi" / "agent" / "sessions"
+# Shared session parsing lives with the skills, not in any project repo:
+# skills/shared/pi_sessions.py (installed at ~/.pi/agent/skills/shared/).
+_SHARED = Path(__file__).resolve().parents[2] / "shared"
+if not _SHARED.exists():
+    _SHARED = Path.home() / ".pi" / "agent" / "skills" / "shared"
+sys.path.insert(0, str(_SHARED))
+import pi_sessions as ps  # noqa: E402
 
-
-def cwd_to_dirname(cwd: str) -> str:
-    # Mirrors pi's own scheme: "/" -> "-"
-    return "--" + cwd.strip("/").replace("/", "-") + "--"
-
-
-def iter_session_files(scope: str, cwd: str):
-    if not SESSIONS_ROOT.exists():
-        return []
-    if scope == "all":
-        return sorted(SESSIONS_ROOT.glob("*/*.jsonl"))
-    target_dir = SESSIONS_ROOT / cwd_to_dirname(cwd)
-    if not target_dir.exists():
-        return []
-    return sorted(target_dir.glob("*.jsonl"))
-
-
-def truncate(s, n):
-    if s is None:
-        return s
-    if len(s) <= n:
-        return s
-    return s[:n] + f"... [truncated, {len(s)} chars total]"
-
-
-def text_of(content):
-    """Flatten UserMessage/AssistantMessage content (str or content-block list) to plain text."""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            t = block.get("type")
-            if t == "text":
-                parts.append(block.get("text", ""))
-            elif t == "thinking":
-                pass  # skip thinking content, not user-facing
-            elif t == "image":
-                parts.append("[image]")
-        return "\n".join(p for p in parts if p)
-    return ""
-
-
-def normalize_for_dedup(s: str) -> str:
-    s = s.lower().strip()
-    s = re.sub(r"\s+", " ", s)
-    s = re.sub(r"[^\w\s]", "", s)
-    return s
-
-
-def short_hash(s: str) -> str:
-    return hashlib.sha1(s.encode("utf-8", "ignore")).hexdigest()[:10]
+SESSIONS_ROOT = ps.SESSIONS_ROOT
+cwd_to_dirname = ps.cwd_to_dirname
+iter_session_files = ps.iter_session_files
+truncate = ps.truncate
+text_of = ps.text_of
+normalize_for_dedup = ps.normalize_for_dedup
+short_hash = ps.short_hash
 
 
 def summarize_tool_args(name, args):

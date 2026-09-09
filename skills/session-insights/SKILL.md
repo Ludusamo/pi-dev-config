@@ -68,3 +68,36 @@ Produce a concise report with:
 
 Do not just dump the raw counts back at the user - synthesize them into
 insight and recommendations.
+
+## Combining with cost-analysis
+
+`session-insights` finds what the user keeps doing; `cost-analysis` finds
+where the money goes. Neither alone answers **"which of my habits is
+expensive?"** - and that is the question that decides what to fix first.
+
+When the user cares about cost as well as habits (or when a redundancy
+finding needs to be prioritized), run the join:
+
+```bash
+python3 "$HOME/.pi/agent/skills/shared/exchange_costs.py" --scope all --out /tmp/exchange_costs.json
+```
+
+It prices **exchanges** - one user request plus every assistant turn and tool
+call it triggered - so each pattern this skill surfaces can be quoted with a
+dollar figure:
+
+- `repeated_request_costs` - the `exact_repeated_user_requests` clusters from
+  this skill, with what they actually cost. A cluster repeated 6 times for
+  $0.02 total is not worth automating; the same count for $2.40 is.
+- `error_costs` - what exchanges containing failed tool calls cost, feeding
+  the `common_errors` section here.
+- `tool_mix_costs` - which combinations of tools show up in expensive
+  exchanges, feeding the tool-usage analysis here.
+- `model_routing` - which models ran each repeated cluster, and whether any of
+  it already runs free locally. This is what turns "you ask this a lot" into
+  "route this to the local model".
+
+Read `~/.pi/agent/skills/cost-analysis/references/optimization-playbook.md`
+before interpreting the dollar figures - especially the warning that later
+exchanges cost more purely because they carry more context, which is why
+every section reports `mean_position`.
