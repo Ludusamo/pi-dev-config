@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { discoverAgents } from "./subagent/agents.ts";
 
 /**
  * A mode bundles the policies that govern how autonomously the agent behaves:
@@ -19,6 +20,25 @@ interface AgentMode {
   gitWritePolicy: "blocked" | "unrestricted";
   systemPromptSnippet: string;
 }
+
+const COORDINATOR_BASE_SNIPPET =
+  "You are in COORDINATOR mode. You are a coordinator, not an implementer:\n" +
+  "- Do not do substantial thinking, research, or implementation work yourself. " +
+  "Break the user's request into concrete tasks and delegate each one to a " +
+  "subagent (the subagent tool). Let subagents do the heavy lifting.\n" +
+  "- Built-in file edit/write and git commit/push are blocked for you directly in " +
+  "this mode - that is intentional. Have a subagent make file changes and commits; " +
+  "only use light read-only tools yourself to route work or sanity-check results.\n" +
+  "- If a subagent's response contains a question, asks for clarification, or " +
+  "seems unsure how to proceed, do NOT answer on its behalf and do NOT guess. Stop, " +
+  "relay the question to the user (ask them directly), and wait for their answer " +
+  "before resuming or re-dispatching the subagent.\n" +
+  "- Default to self-doubt: assume your own unaided judgement is more likely wrong " +
+  "than a subagent's focused output or the user's clarification. Prefer verifying " +
+  "through a subagent, or checking with the user, over confidently asserting an " +
+  "answer yourself.\n" +
+  "- When unsure whether something needs user input or another subagent, err on the " +
+  "side of asking rather than proceeding unilaterally.";
 
 const MODES: Record<string, AgentMode> = {
   pair: {
@@ -53,24 +73,10 @@ const MODES: Record<string, AgentMode> = {
       "questions to the user; err on the side of self-doubt.",
     editPolicy: "blocked",
     gitWritePolicy: "blocked",
-    systemPromptSnippet:
-      "You are in COORDINATOR mode. You are a coordinator, not an implementer:\n" +
-      "- Do not do substantial thinking, research, or implementation work yourself. " +
-      "Break the user's request into concrete tasks and delegate each one to a " +
-      "subagent (the subagent tool). Let subagents do the heavy lifting.\n" +
-      "- Built-in file edit/write and git commit/push are blocked for you directly in " +
-      "this mode - that is intentional. Have a subagent make file changes and commits; " +
-      "only use light read-only tools yourself to route work or sanity-check results.\n" +
-      "- If a subagent's response contains a question, asks for clarification, or " +
-      "seems unsure how to proceed, do NOT answer on its behalf and do NOT guess. Stop, " +
-      "relay the question to the user (ask them directly), and wait for their answer " +
-      "before resuming or re-dispatching the subagent.\n" +
-      "- Default to self-doubt: assume your own unaided judgement is more likely wrong " +
-      "than a subagent's focused output or the user's clarification. Prefer verifying " +
-      "through a subagent, or checking with the user, over confidently asserting an " +
-      "answer yourself.\n" +
-      "- When unsure whether something needs user input or another subagent, err on the " +
-      "side of asking rather than proceeding unilaterally.",
+    // Static fallback only - the live snippet actually injected each turn is
+    // computed fresh by buildCoordinatorSnippet() so it can include an
+    // up-to-date list of real subagent names. See lastCoordinatorSnippet.
+    systemPromptSnippet: COORDINATOR_BASE_SNIPPET,
   },
 };
 
@@ -148,6 +154,56 @@ function labelForSubagentCall(args: Record<string, any>): string {
   return "subagent";
 }
 
+// --- Coordinator-mode live agent list ---------------------------------
+//
+// Coordinator mode's whole job is delegating to subagents, so its system
+// prompt needs to know which subagent names actually exist right now -
+// otherwise the model tends to guess/invent plausible-sounding agent names.
+// This is recomputed on every before_agent_start (see below) from the same
+// user-scope agent directory the subagent tool itself reads from, so it
+// can't drift out of sync as agents are added/removed/renamed.
+
+const AGENT_DESCRIPTION_MAX = 160;
+
+function buildAgentListSnippet(cwd: string): string {
+  let agents: { name: string; description: string }[];
+  try {
+    agents = discoverAgents(cwd, "user").agents;
+  } catch {
+    return (
+      "The list of available subagents could not be loaded right now. Do not " +
+      "delegate to the subagent tool until this is resolved - tell the user the " +
+      "subagent list failed to load and ask how they'd like to proceed."
+    );
+  }
+
+  if (agents.length === 0) {
+    return (
+      "There are currently no subagents available. Do not attempt to use the " +
+      "subagent tool - tell the user no subagents are configured and ask how " +
+      "they'd like to proceed."
+    );
+  }
+
+  const lines = agents
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((a) => `- \`${a.name}\`: ${truncate(a.description, AGENT_DESCRIPTION_MAX)}`);
+
+  return (
+    "Available subagents (the only valid values for `agent` in the subagent tool, " +
+    "including inside tasks/chain/open):\n" +
+    lines.join("\n") +
+    "\n" +
+    "These are the ONLY valid agent names. Never invent, guess, or rename an agent " +
+    "- if none of these fit the task, say so and ask the user rather than making one up."
+  );
+}
+
+function buildCoordinatorSnippet(cwd: string): string {
+  return `${COORDINATOR_BASE_SNIPPET}\n\n${buildAgentListSnippet(cwd)}`;
+}
+
 // Global (cross-session, cross-project) record of the last mode used.
 const STATE_FILE = join(homedir(), ".pi", "agent", "agent-modes-state.json");
 
@@ -174,6 +230,12 @@ export default function (pi: ExtensionAPI) {
   // away again (but not if the user has since picked a mode explicitly).
   let autoSwitchedForModel = false;
   let modeBeforeAutoSwitch: string | undefined;
+
+  // The coordinator-mode snippet actually injected on the most recent turn
+  // (base instructions + live agent list), so the context filter below can
+  // recognize it as current even though it's recomputed per-turn rather than
+  // being a fixed string like the other modes' snippets.
+  let lastCoordinatorSnippet: string | undefined;
 
   let delegatedTasks: DelegatedTask[] = [];
   // Context from the most recent event, reused by the tick timer below since
@@ -366,12 +428,18 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Inject the current mode's behavior snippet for each turn.
-  pi.on("before_agent_start", async () => {
+  // Inject the current mode's behavior snippet for each turn. Coordinator
+  // mode's snippet is recomputed fresh every time (rather than the mode's
+  // static systemPromptSnippet) so it always reflects the current live list
+  // of subagents.
+  pi.on("before_agent_start", async (_event, ctx) => {
+    const content =
+      currentMode.name === "coordinator" ? buildCoordinatorSnippet(ctx.cwd) : currentMode.systemPromptSnippet;
+    if (currentMode.name === "coordinator") lastCoordinatorSnippet = content;
     return {
       message: {
         customType: "agent-mode-context",
-        content: currentMode.systemPromptSnippet,
+        content,
         display: false,
       },
     };
@@ -379,12 +447,18 @@ export default function (pi: ExtensionAPI) {
 
   // Strip stale mode-context messages that don't match the current mode, so
   // switching modes mid-session doesn't leave old instructions in context.
+  // Coordinator mode's snippet is recomputed per-turn (see above), so it's
+  // compared against the last-injected value rather than a fixed string.
   pi.on("context", async (event) => {
+    const expected =
+      currentMode.name === "coordinator"
+        ? (lastCoordinatorSnippet ?? COORDINATOR_BASE_SNIPPET)
+        : currentMode.systemPromptSnippet;
     return {
       messages: event.messages.filter((m) => {
         const msg = m as typeof m & { customType?: string; content?: unknown };
         if (msg.customType !== "agent-mode-context") return true;
-        return msg.content === currentMode.systemPromptSnippet;
+        return msg.content === expected;
       }),
     };
   });
