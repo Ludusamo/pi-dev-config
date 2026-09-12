@@ -449,6 +449,7 @@ export default function (pi: ExtensionAPI) {
 			"Delegate tasks to specialized subagents running in either the `pi` or `claude` CLI, each with isolated context.",
 			"One-shot modes: single (agent+task), parallel (tasks array), chain (sequential with {previous} placeholder).",
 			"Persistent modes: open (start a session, returns a handle), send (continue a session by handle), close (forget a handle), list (show open handles).",
+			"Default to one-shot for most tasks; use open/send/close only when a subagent needs to keep the same accumulated context across turns (e.g. a reviewer verifying fixes against its own prior findings).",
 			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
 			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 			"Each agent's frontmatter sets `runtime: pi` (default) or `runtime: claude` to pick which CLI runs it.",

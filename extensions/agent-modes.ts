@@ -38,7 +38,15 @@ const COORDINATOR_BASE_SNIPPET =
   "through a subagent, or checking with the user, over confidently asserting an " +
   "answer yourself.\n" +
   "- When unsure whether something needs user input or another subagent, err on the " +
-  "side of asking rather than proceeding unilaterally.";
+  "side of asking rather than proceeding unilaterally.\n" +
+  "- Default to one-shot delegation (single/parallel/chain) - it's simpler and " +
+  "leaves no stale state behind. Reach for persistent open/send/close only for " +
+  "genuine multi-turn work against the same accumulated context, e.g. iterative " +
+  "code review: open a reviewer on a diff, dispatch a one-shot worker to make " +
+  "fixes, then send the updated diff back to that same reviewer handle to verify " +
+  "the prior findings. Close a session once its work is done; use list if you " +
+  "lose track of a handle; never invent or guess a handle - only use ones " +
+  "returned by open or list.";
 
 const MODES: Record<string, AgentMode> = {
   pair: {
