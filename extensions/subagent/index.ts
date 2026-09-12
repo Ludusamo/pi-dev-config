@@ -29,7 +29,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { StringEnum, type AssistantMessage } from "@earendil-works/pi-ai";
+import { StringEnum, type AssistantMessage, type Usage } from "@earendil-works/pi-ai";
 import { type AgentConfig, type AgentRuntime, type AgentScope, discoverAgents } from "./agents.ts";
 import type { AgentCostBreakdown } from "./cost.ts";
 import { type DisplayItem, type DispatchDefaults, emptyUsage, runAgent, type RunResult, type UsageStats } from "./runners.ts";
@@ -58,6 +58,42 @@ function formatUsageStats(usage: UsageStats, model?: string): string {
 	if (usage.contextTokens > 0) parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
 	if (model) parts.push(model);
 	return parts.join(" ");
+}
+
+function aggregateUsageStats(usages: UsageStats[]): UsageStats {
+	const total = emptyUsage();
+	for (const usage of usages) {
+		total.input += usage.input;
+		total.output += usage.output;
+		total.cacheRead += usage.cacheRead;
+		total.cacheWrite += usage.cacheWrite;
+		total.cost += usage.cost;
+		total.turns += usage.turns;
+		total.contextTokens = Math.max(total.contextTokens, usage.contextTokens);
+	}
+	return total;
+}
+
+function usageStatsToPiUsage(usage: UsageStats): Usage | undefined {
+	if (!usage.input && !usage.output && !usage.cacheRead && !usage.cacheWrite && !usage.cost) return undefined;
+	return {
+		input: usage.input,
+		output: usage.output,
+		cacheRead: usage.cacheRead,
+		cacheWrite: usage.cacheWrite,
+		totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+		cost: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			total: usage.cost,
+		},
+	};
+}
+
+function resultUsage(results: SingleResult[]): Usage | undefined {
+	return usageStatsToPiUsage(aggregateUsageStats(results.map((r) => r.usage)));
 }
 
 /** Sum of the main (non-subagent) session's own assistant-turn cost, for combining with subagent cost into a single total. */
@@ -368,19 +404,8 @@ const SubagentParams = Type.Object({
 export default function (pi: ExtensionAPI) {
 	const store = new SubagentStore();
 
-	// Unified session cost: main session's own turns + every subagent run's cost, combined
-	// into one live-updating status bar figure so cost isn't hidden across isolated contexts.
-	function updateCostStatus(ctx: ExtensionCommandContext | ExtensionContext) {
-		const total = getMainSessionCost(ctx) + store.totalCost;
-		ctx.ui.setStatus("session-cost", total > 0 ? `$${total.toFixed(2)}` : undefined);
-	}
-
-	pi.on("message_end", (event, ctx) => {
-		if (event.message.role === "assistant") updateCostStatus(ctx);
-	});
-	pi.on("tool_execution_end", (event, ctx) => {
-		if (event.toolName === "subagent") updateCostStatus(ctx);
-	});
+	// Subagent model usage is returned from the tool result itself, so pi's built-in
+	// footer, /session, and RPC totals stay authoritative without a custom status override.
 
 	// Rebuild the handle map from session history so handles survive resume/fork.
 	pi.on("session_start", async (_event, ctx) => {
@@ -415,7 +440,6 @@ export default function (pi: ExtensionAPI) {
 				store.set(session.status === "running" ? { ...session, status: "failed" } : session);
 			}
 		}
-		updateCostStatus(ctx);
 	});
 
 	pi.registerTool({
@@ -605,6 +629,7 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text }],
 					details: { kind: "session", action: "open", session } satisfies SubagentDetails,
+					usage: usageStatsToPiUsage(runResult.usage),
 					isError,
 				};
 			}
@@ -728,6 +753,7 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text }],
 					details: { kind: "session", action: "send", session: updated } satisfies SubagentDetails,
+					usage: usageStatsToPiUsage(runResult.usage),
 					isError,
 				};
 			}
@@ -747,6 +773,7 @@ export default function (pi: ExtensionAPI) {
 						return {
 							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${getResultOutput(result)}` }],
 							details: makeRunDetails("chain")(results),
+							usage: resultUsage(results),
 							isError: true,
 						};
 					}
@@ -755,6 +782,7 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: results[results.length - 1].finalText || "(no output)" }],
 					details: makeRunDetails("chain")(results),
+					usage: resultUsage(results),
 				};
 			}
 
@@ -803,6 +831,7 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}` }],
 					details: makeRunDetails("parallel")(results),
+					usage: resultUsage(results),
 				};
 			}
 
@@ -815,10 +844,15 @@ export default function (pi: ExtensionAPI) {
 					return {
 						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${getResultOutput(result)}` }],
 						details: makeRunDetails("single")([result]),
+						usage: usageStatsToPiUsage(result.usage),
 						isError: true,
 					};
 				}
-				return { content: [{ type: "text", text: result.finalText || "(no output)" }], details: makeRunDetails("single")([result]) };
+				return {
+					content: [{ type: "text", text: result.finalText || "(no output)" }],
+					details: makeRunDetails("single")([result]),
+					usage: usageStatsToPiUsage(result.usage),
+				};
 			}
 
 			const available = agents.map((a) => `${a.name} (${a.source}/${a.runtime})`).join(", ") || "none";
