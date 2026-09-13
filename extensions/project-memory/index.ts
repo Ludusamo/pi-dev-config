@@ -2,8 +2,17 @@
  * project-memory - durable, project-scoped memory for the agent.
  *
  * - Storage location is configurable (private/repo/custom/off), private by default.
- * - Worktrees of the same repo share private/custom memory (keyed by git's
- *   common dir); separate clones do not. See resolve.ts.
+ * - Private/custom memory is keyed by name: a git repo's remote repo name
+ *   (falling back to its folder name with no remote), or a plain directory's
+ *   folder name. Worktrees of the same repo always share it (same remote/repo
+ *   name); separate clones or forks that happen to share a name share it too
+ *   - that's intentional, not a collision to avoid. See resolve.ts.
+ * - The mode/custom-path config entry is keyed the same way, so two
+ *   same-named projects share their memory-mode setting too, not just their
+ *   memory content. Private mode has no trust gate, so any directory whose
+ *   name sanitizes to an existing project's key can read and write that
+ *   project's private memory with no prompt - be mindful of this in
+ *   untrusted checkouts (see the security note in resolve.ts).
  * - The main agent can read and write; pi-runtime subagents (PI_SUBAGENT=1
  *   child `pi` processes) are read-only - they get memory_search/memory_get
  *   but not the write/update/promote/delete tools, and their built-in
@@ -24,10 +33,19 @@ import { join, resolve as resolvePath } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { setProjectConfig, writeRepoMarker } from "./config.ts";
+import { dropProjectConfigKey, readGlobalConfig, setProjectConfig, writeRepoMarker } from "./config.ts";
 import { buildMemoryContextMessage, dropStaleMemoryContext, resolveMemoryContextContent } from "./inject.ts";
+import { moveProjectKey } from "./migrate.ts";
+import { defaultProjectsDir, pathExists, privateMemoryRoot } from "./paths.ts";
 import { commandMentionsPath, isWithinRoot, resolveCandidatePath, resolveGuardedRoot } from "./pathguard.ts";
-import { getGitInfo, resolveMemory, type ResolvedMemory } from "./resolve.ts";
+import {
+	getGitInfo,
+	LEGACY_HASH_PATTERN,
+	PROJECT_KEY_PATTERN,
+	relinkKeyCandidates,
+	resolveMemory,
+	type ResolvedMemory,
+} from "./resolve.ts";
 import * as store from "./store.ts";
 import type { MemoryFrontmatter, MemoryMode } from "./types.ts";
 
@@ -68,11 +86,21 @@ export default function projectMemory(pi: ExtensionAPI) {
 
 	function ensureResolved(ctx: ExtensionContext): Promise<ResolvedMemory> {
 		if (!resolvedPromise) {
-			resolvedPromise = resolveMemory({
+			const promise = resolveMemory({
 				cwd: ctx.cwd,
 				isProjectTrusted: ctx.isProjectTrusted(),
 				globalConfigPath: GLOBAL_CONFIG_PATH,
+				allowIdentityWrite: !isSubagent,
 			});
+			// resolveMemory itself shouldn't reject in practice (identity/migration
+			// failures fall back to the legacy key instead), but if something
+			// unexpected does throw, don't cache the rejection - the next call
+			// should get a fresh attempt rather than being stuck failing for the
+			// rest of the session.
+			promise.catch(() => {
+				if (resolvedPromise === promise) resolvedPromise = undefined;
+			});
+			resolvedPromise = promise;
 		}
 		return resolvedPromise;
 	}
@@ -469,7 +497,8 @@ export default function projectMemory(pi: ExtensionAPI) {
 				if (!arg) {
 					const r = await ensureResolved(ctx);
 					ctx.ui.notify(
-						`Project memory mode: ${r.mode}${r.root ? ` (${r.root})` : ""}${r.reason ? ` - ${r.reason}` : ""}`,
+						`Project memory mode: ${r.mode}${r.root ? ` (${r.root})` : ""}${r.reason ? ` - ${r.reason}` : ""} [key: ${r.projectKey}]` +
+							(r.identityReason ? `\n${r.identityReason}` : ""),
 						"info",
 					);
 					return;
@@ -516,6 +545,132 @@ export default function projectMemory(pi: ExtensionAPI) {
 				invalidateResolved();
 				const next = await ensureResolved(ctx);
 				ctx.ui.notify(`Project memory mode set to ${next.mode}${next.root ? ` (${next.root})` : ""}.`, "info");
+			},
+		});
+
+		pi.registerCommand("memory-relink", {
+			description:
+				"Merge an old project's private memory (by key, by key:<name>, or by its old path) into this " +
+				"project's current key. Add --drop-old-config to discard a leftover old-key config entry that " +
+				"conflicts with this project's current one (relinking alone can't clear that kind of conflict); " +
+				"like the relink itself, without a UI this also requires --force. " +
+				"If the old key isn't a leftover legacy id - i.e. it looks like another project's current, " +
+				"live key - relinking asks for confirmation first (or, without a UI, requires --force) so a " +
+				"mistyped path can't silently drain another project's memory into this one.",
+			handler: async (args, ctx) => {
+				const tokens = args.trim().split(/\s+/).filter(Boolean);
+				const dropOldConfig = tokens.includes("--drop-old-config");
+				const force = tokens.includes("--force");
+				const arg = tokens.filter((t) => t !== "--drop-old-config" && t !== "--force").join(" ");
+				if (!arg) {
+					ctx.ui.notify("Usage: /memory-relink <oldKey|key:<name>|oldPath> [--drop-old-config] [--force]", "error");
+					return;
+				}
+
+				const r = await ensureResolved(ctx);
+				const projectsDir = defaultProjectsDir();
+				const candidates = await relinkKeyCandidates(arg, ctx.cwd);
+				const globalConfig = await readGlobalConfig(GLOBAL_CONFIG_PATH);
+
+				let oldKey: string | undefined;
+				for (const candidate of candidates) {
+					if (candidate === r.projectKey) continue;
+					const hasConfig = Object.hasOwn(globalConfig.projects, candidate);
+					const hasDir = await pathExists(privateMemoryRoot(candidate, projectsDir));
+					if (hasConfig || hasDir) {
+						oldKey = candidate;
+						break;
+					}
+				}
+
+				if (!oldKey) {
+					if (candidates.includes(r.projectKey)) {
+						ctx.ui.notify("That key already matches this project's current key; nothing to relink.", "info");
+						return;
+					}
+					ctx.ui.notify(
+						`No project memory found for ${arg} (checked ${candidates.length} candidate key${candidates.length === 1 ? "" : "s"}: ${candidates.join(", ")}).`,
+						"error",
+					);
+					return;
+				}
+
+				// A legacy-shaped key (`g-...` or a bare 16-hex hash) can only ever be
+				// this same repo's own past identity - those schemes are never written
+				// anymore, so nothing else could still be using one live. Anything else
+				// is a normal name key, which could be another project's *current* key
+				// (e.g. `/memory-relink ../other-repo` when `other-repo` is a real,
+				// still-in-use project someone mistyped their way into) - relinking that
+				// would move its private memory away from it. Confirm before doing that
+				// when there's a UI to ask; without one, require an explicit --force so
+				// it can never happen silently.
+				const oldKeyIsLegacyShape = PROJECT_KEY_PATTERN.test(oldKey) || LEGACY_HASH_PATTERN.test(oldKey);
+				if (!oldKeyIsLegacyShape) {
+					if (ctx.hasUI) {
+						const confirmed = await ctx.ui.confirm(
+							"Relink another project's memory key?",
+							`${oldKey} doesn't look like a leftover legacy id - it may be another project's current memory key. ` +
+								`Relinking will move its private memory (and config) into this project's key (${r.projectKey}). ` +
+								`Only continue if you're sure ${oldKey} isn't still in active use elsewhere.`,
+						);
+						if (!confirmed) {
+							ctx.ui.notify("Relink cancelled.", "info");
+							return;
+						}
+					} else if (!force) {
+						ctx.ui.notify(
+							`${oldKey} doesn't look like a leftover legacy id - it may be another project's current memory key. ` +
+								`Re-run with --force to relink it anyway (only do this if you're sure it isn't still in active use elsewhere).`,
+							"error",
+						);
+						return;
+					}
+				}
+
+				const result = await moveProjectKey({ configPath: GLOBAL_CONFIG_PATH, projectsDir, oldKey, newKey: r.projectKey });
+
+				let configDropped = false;
+				if (result.config === "conflict" && dropOldConfig) {
+					// Discarding a config entry is permanent, so it needs either an
+					// explicit confirmation (when there's a UI to ask) or an explicit
+					// --force (without one) - it must never auto-confirm itself.
+					const confirmed = ctx.hasUI
+						? await ctx.ui.confirm(
+								"Discard the old config entry?",
+								`This project already has its own memory-mode config; the leftover entry under ${oldKey} will be permanently discarded (only the config entry, not any memory files).`,
+							)
+						: force;
+					if (!confirmed && !ctx.hasUI) {
+						ctx.ui.notify(
+							"--drop-old-config without a UI also requires --force (only do this if you're sure this project's current config is the one to keep).",
+							"error",
+						);
+						return;
+					}
+					if (confirmed) {
+						await dropProjectConfigKey(GLOBAL_CONFIG_PATH, oldKey);
+						configDropped = true;
+					}
+				}
+				invalidateResolved();
+
+				const configText = configDropped
+					? "old config entry discarded (kept this project's existing one)"
+					: result.config === "moved"
+						? "config moved"
+						: result.config === "conflict"
+							? `config left in place under the old key (this project already has its own; rerun with --drop-old-config to discard the old one)`
+							: "no config to move";
+				const dirText =
+					result.dir === "moved"
+						? "private memory moved"
+						: result.dir === "merged"
+							? "private memory merged"
+							: result.dir === "conflict"
+								? `private memory partially merged (${result.dirConflicts.length} conflicting file${result.dirConflicts.length === 1 ? "" : "s"} left under the old key: ${result.dirConflicts.join(", ")})`
+								: "no private memory to move";
+
+				ctx.ui.notify(`Relinked ${oldKey} into this project's key (${r.projectKey}): ${configText}; ${dirText}.`, "info");
 			},
 		});
 	}

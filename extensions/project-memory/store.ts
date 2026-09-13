@@ -97,7 +97,8 @@ async function writeEntryUnlocked(
 	return { frontmatter, body, filePath };
 }
 
-function lockDir(root: string): string {
+/** The mkdir-lock directory guarding writes to `root`. Also used by migrate.ts to hold off concurrent writers while merging a private dir. */
+export function lockDir(root: string): string {
 	return join(root, ".lock");
 }
 

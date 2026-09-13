@@ -83,6 +83,17 @@ with `/memory-mode` (no args), or set it with
 `/memory-mode <private|repo|custom|off> [path]`. Repo mode commits a marker
 file so a team shares the setting, and requires the project to be trusted.
 
+For a git repo, private/custom memory is keyed by name: the repo's remote name (`origin` if configured, otherwise the first remote git reports), or its folder name if it has no remote (shown by `/memory-mode`).
+A plain, non-git directory is keyed by its folder name.
+This means every worktree of a repo shares memory, and separate clones or forks that happen to share a name share memory too - that's intentional, not something to work around.
+The memory-mode setting itself (private/repo/custom/off, and any custom path) is keyed the same way, so same-named projects share that too, not just the memory content.
+
+Because identity is name-based, this has a real security implication: private mode has no trust gate, so any directory - including an untrusted checkout - whose remote or folder name sanitizes to an existing project's key gets full read/write access to that project's private memory with no prompt at all.
+Be mindful of this when working in an untrusted checkout, especially one whose name you don't recognize as genuinely new.
+
+If you need to merge an old key's memory into the current one (for example after a repo was renamed, or to consolidate memory from before this naming scheme), use `/memory-relink <oldKey|oldPath>`, or `/memory-relink key:<name>` to look up a literal key by name even if a same-named local file or directory would otherwise be picked up instead.
+If the old key doesn't look like a leftover legacy id - i.e. it looks like it could be another project's current, live key - relinking will ask for confirmation first (or, without an interactive UI, require `/memory-relink ... --force`) before moving anything, so a mistyped path can't silently drain another project's memory into this one.
+
 If you're running as a pi-runtime subagent (a child `pi` process with
 `PI_SUBAGENT=1` set), only `memory_search` and `memory_get` are available to
 you - writing, updating, promoting, and deleting memory is reserved for the
