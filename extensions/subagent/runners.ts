@@ -110,9 +110,10 @@ function spawnWithAbort(
 	signal: AbortSignal | undefined,
 	onLine: (line: string) => void,
 	onStderr: (chunk: string) => void,
+	env?: NodeJS.ProcessEnv,
 ): Promise<{ exitCode: number; wasAborted: boolean }> {
 	return new Promise((resolve) => {
-		const proc = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+		const proc = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"], env });
 		let buffer = "";
 		let wasAborted = false;
 		// `proc.killed` flips to true as soon as `.kill()` is *called*, not once the
@@ -253,6 +254,11 @@ export async function runPiAgent(opts: RunOptions): Promise<RunResult> {
 			}
 		};
 
+		// Scoped to this child only - never mutate the parent's process.env - so
+		// extensions (e.g. project-memory) loaded inside the spawned pi process
+		// can tell they're running as a subagent rather than the main agent.
+		const childEnv = { ...process.env, PI_SUBAGENT: "1" };
+
 		const { exitCode, wasAborted } = await spawnWithAbort(
 			getPiInvocation(args).command,
 			getPiInvocation(args).args,
@@ -262,6 +268,7 @@ export async function runPiAgent(opts: RunOptions): Promise<RunResult> {
 			(chunk) => {
 				result.stderr += chunk;
 			},
+			childEnv,
 		);
 
 		result.exitCode = exitCode;
