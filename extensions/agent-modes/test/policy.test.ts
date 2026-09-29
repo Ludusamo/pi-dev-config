@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_MODE, getModePolicy, MODES, parseModeArgs, SESSION_ONLY_FLAG, TOUR_MODE_NAME } from "../policy.ts";
 
 test("MODES has a policy for every built-in mode name", () => {
-  for (const name of ["pair", "auto", "coordinator", "tour"]) {
+  for (const name of ["pair", "guarded", "auto", "coordinator", "tour"]) {
     assert.ok(MODES[name], `missing mode: ${name}`);
   }
 });
@@ -14,6 +14,10 @@ test("DEFAULT_MODE is a real mode", () => {
 
 test("getModePolicy reports tour mode as fully blocked (edits and git writes)", () => {
   assert.deepEqual(getModePolicy(TOUR_MODE_NAME), { editPolicy: "blocked", gitWritePolicy: "blocked" });
+});
+
+test("getModePolicy reports guarded mode as confirmation-gated", () => {
+  assert.deepEqual(getModePolicy("guarded"), { editPolicy: "confirm", gitWritePolicy: "confirm" });
 });
 
 test("getModePolicy reports auto mode as fully unrestricted", () => {

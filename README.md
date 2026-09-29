@@ -8,8 +8,9 @@ Configuration files for pi.dev agent
 The `agent-modes` extension bundles the policies that govern how autonomously the agent behaves: which built-in tools are available, whether git write commands (commit/push/merge/rebase/reset --hard/tag) are allowed, and a system prompt snippet describing the mode's behavior.
 It is configured through the `/mode` command; add `--session` (e.g. `/mode tour --session`) to switch for the current session only, without changing the persisted default used by future sessions/projects.
 
-Four modes are built in.
+Five modes are built in.
 Pair mode blocks file edits and git writes so the agent designs and discusses with the user rather than acting unilaterally.
+Guarded mode sits between pair and auto: the agent can investigate and plan autonomously, but edit/write tool calls and git write commands require confirmation first.
 Auto mode is fully autonomous, with edits and git writes unrestricted.
 Coordinator mode also blocks edits and git writes for the main agent directly, and instructs it to delegate implementation work to subagents, escalate any subagent questions to the user instead of guessing, and default to self-doubt over confidently asserting an answer itself.
 Tour mode also blocks edits and git writes, and is meant to be paired with the `codebase-tour` extension: it guides the agent to run a read-only, mixed Socratic/explain-first walkthrough of the codebase using that extension's tools, instead of narrating a tour from memory with no way to resume it later.

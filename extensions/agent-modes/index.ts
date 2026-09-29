@@ -21,6 +21,31 @@ function isGitWriteCommand(command: string | undefined): boolean {
   return GIT_WRITE_COMMAND.test(command);
 }
 
+function describeEditToolCall(toolName: string, input: unknown): string {
+  const obj = input && typeof input === "object" ? (input as Record<string, any>) : {};
+  const path = typeof obj.path === "string" ? obj.path : "unknown path";
+  if (toolName === "write") return `write file: ${path}`;
+  if (toolName === "edit") {
+    const count = Array.isArray(obj.edits) ? obj.edits.length : undefined;
+    return `edit file: ${path}${count === undefined ? "" : ` (${count} replacement${count === 1 ? "" : "s"})`}`;
+  }
+  return toolName;
+}
+
+function describeBashToolCall(input: unknown): string {
+  const obj = input && typeof input === "object" ? (input as { command?: unknown }) : {};
+  return typeof obj.command === "string" ? obj.command : "unknown command";
+}
+
+async function confirmToolCall(
+  ctx: ExtensionCommandContext | ExtensionContext,
+  title: string,
+  body: string,
+): Promise<boolean> {
+  if (!ctx.hasUI) return false;
+  return await ctx.ui.confirm(title, body);
+}
+
 // --- Coordinator-mode delegation footer -----------------------------------
 //
 // Tracks subagent tool calls made while in coordinator mode and renders them
@@ -314,7 +339,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("mode", {
     description:
-      `Switch agent mode (pair | auto | coordinator | tour). Add ${SESSION_ONLY_FLAG} to switch ` +
+      `Switch agent mode (${Object.keys(MODES).join(" | ")}). Add ${SESSION_ONLY_FLAG} to switch ` +
       "for this session only, without changing the persisted default for future sessions/projects.",
     handler: async (args, ctx) => {
       const { name: requested, persist, error } = parseModeArgs(args);
@@ -337,25 +362,45 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Tool gating: block edit/write and git write commands per mode policy.
-  pi.on("tool_call", async (event) => {
-    if ((event.toolName === "edit" || event.toolName === "write") && currentMode.editPolicy === "blocked") {
-      return {
-        block: true,
-        reason:
-          `${currentMode.label} mode: direct file edits are blocked. Ask the user, or delegate ` +
-          "to a subagent, to make this change.",
-      };
+  // Tool gating: block or confirm edit/write and git write commands per mode policy.
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "edit" || event.toolName === "write") {
+      if (currentMode.editPolicy === "blocked") {
+        return {
+          block: true,
+          reason:
+            `${currentMode.label} mode: direct file edits are blocked. Ask the user, or delegate ` +
+            "to a subagent, to make this change.",
+        };
+      }
+      if (currentMode.editPolicy === "confirm") {
+        const action = describeEditToolCall(event.toolName, event.input);
+        const ok = await confirmToolCall(ctx, `${currentMode.label}: allow file write?`, action);
+        if (!ok) {
+          return {
+            block: true,
+            reason: `${currentMode.label} mode: file write blocked because approval was not granted.`,
+          };
+        }
+      }
     }
-    if (
-      event.toolName === "bash" &&
-      currentMode.gitWritePolicy === "blocked" &&
-      isGitWriteCommand((event.input as { command?: string }).command)
-    ) {
-      return {
-        block: true,
-        reason: `${currentMode.label} mode: git write commands (commit/push/etc.) are blocked.`,
-      };
+    if (event.toolName === "bash" && isGitWriteCommand((event.input as { command?: string }).command)) {
+      if (currentMode.gitWritePolicy === "blocked") {
+        return {
+          block: true,
+          reason: `${currentMode.label} mode: git write commands (commit/push/etc.) are blocked.`,
+        };
+      }
+      if (currentMode.gitWritePolicy === "confirm") {
+        const command = describeBashToolCall(event.input);
+        const ok = await confirmToolCall(ctx, `${currentMode.label}: allow git write command?`, command);
+        if (!ok) {
+          return {
+            block: true,
+            reason: `${currentMode.label} mode: git write command blocked because approval was not granted.`,
+          };
+        }
+      }
     }
   });
 

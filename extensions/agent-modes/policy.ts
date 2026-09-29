@@ -16,8 +16,8 @@ export interface AgentMode {
   name: string;
   label: string;
   description: string;
-  editPolicy: "blocked" | "unrestricted";
-  gitWritePolicy: "blocked" | "unrestricted";
+  editPolicy: "blocked" | "confirm" | "unrestricted";
+  gitWritePolicy: "blocked" | "confirm" | "unrestricted";
   systemPromptSnippet: string;
 }
 
@@ -60,6 +60,19 @@ export const MODES: Record<string, AgentMode> = {
       "You are in PAIR CODING mode. Spend time designing with the user, offering " +
       "suggestions, and proposing code snippets. Do not edit or write files, and do " +
       "not commit or push, unless the user explicitly asks you to.",
+  },
+  guarded: {
+    name: "guarded",
+    label: "Guarded Auto",
+    description:
+      "Work autonomously, but ask before editing/writing files or running git write commands.",
+    editPolicy: "confirm",
+    gitWritePolicy: "confirm",
+    systemPromptSnippet:
+      "You are in GUARDED AUTO mode. Work autonomously on investigation, design, and review. " +
+      "Before editing or writing files, committing, pushing, or running other git write commands, " +
+      "request approval through the tool confirmation flow. If approval is denied, explain the " +
+      "blocked action and ask how to proceed.",
   },
   auto: {
     name: "auto",
