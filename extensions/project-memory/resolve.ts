@@ -253,7 +253,13 @@ async function gitProjectName(gitInfo: GitInfo, cwd: string): Promise<string> {
 	return basename(gitInfo.toplevel);
 }
 
-async function gitProjectKey(gitInfo: GitInfo, cwd: string): Promise<string> {
+/**
+ * Exported (in addition to being used internally) so other extensions that
+ * need the same repo-identity key - e.g. codebase-tour, keying its storage
+ * under `~/.pi/agent/tours/<projectKey>/` - can derive it identically instead
+ * of duplicating the worktree/bare-repo/remote-name edge cases handled here.
+ */
+export async function gitProjectKey(gitInfo: GitInfo, cwd: string): Promise<string> {
 	return sanitizeProjectKey(await gitProjectName(gitInfo, cwd));
 }
 

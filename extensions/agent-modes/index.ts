@@ -4,91 +4,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { discoverAgents } from "./subagent/agents.ts";
-
-/**
- * A mode bundles the policies that govern how autonomously the agent behaves:
- * - which built-in tools are available (e.g. edit/write removed in pair mode)
- * - whether git write commands (commit/push) are allowed
- * - a system prompt snippet describing the mode's behavior to the model
- */
-interface AgentMode {
-  name: string;
-  label: string;
-  description: string;
-  editPolicy: "blocked" | "unrestricted";
-  gitWritePolicy: "blocked" | "unrestricted";
-  systemPromptSnippet: string;
-}
-
-const COORDINATOR_BASE_SNIPPET =
-  "You are in COORDINATOR mode. You are a coordinator, not an implementer:\n" +
-  "- Do not do substantial thinking, research, or implementation work yourself. " +
-  "Break the user's request into concrete tasks and delegate each one to a " +
-  "subagent (the subagent tool). Let subagents do the heavy lifting.\n" +
-  "- Built-in file edit/write and git commit/push are blocked for you directly in " +
-  "this mode - that is intentional. Have a subagent make file changes and commits; " +
-  "only use light read-only tools yourself to route work or sanity-check results.\n" +
-  "- If a subagent's response contains a question, asks for clarification, or " +
-  "seems unsure how to proceed, do NOT answer on its behalf and do NOT guess. Stop, " +
-  "relay the question to the user (ask them directly), and wait for their answer " +
-  "before resuming or re-dispatching the subagent.\n" +
-  "- Default to self-doubt: assume your own unaided judgement is more likely wrong " +
-  "than a subagent's focused output or the user's clarification. Prefer verifying " +
-  "through a subagent, or checking with the user, over confidently asserting an " +
-  "answer yourself.\n" +
-  "- When unsure whether something needs user input or another subagent, err on the " +
-  "side of asking rather than proceeding unilaterally.\n" +
-  "- Default to one-shot delegation (single/parallel/chain) - it's simpler and " +
-  "leaves no stale state behind. Reach for persistent open/send/close only for " +
-  "genuine multi-turn work against the same accumulated context, e.g. iterative " +
-  "code review: open a reviewer on a diff, dispatch a one-shot worker to make " +
-  "fixes, then send the updated diff back to that same reviewer handle to verify " +
-  "the prior findings. Close a session once its work is done; use list if you " +
-  "lose track of a handle; never invent or guess a handle - only use ones " +
-  "returned by open or list.";
-
-const MODES: Record<string, AgentMode> = {
-  pair: {
-    name: "pair",
-    label: "Pair Coding",
-    description:
-      "Design and discuss together. Never edit files or commit/push without explicit user permission.",
-    editPolicy: "blocked",
-    gitWritePolicy: "blocked",
-    systemPromptSnippet:
-      "You are in PAIR CODING mode. Spend time designing with the user, offering " +
-      "suggestions, and proposing code snippets. Do not edit or write files, and do " +
-      "not commit or push, unless the user explicitly asks you to.",
-  },
-  auto: {
-    name: "auto",
-    label: "Full Auto",
-    description:
-      "Fully autonomous: design, implement, review, and commit without needing to check in.",
-    editPolicy: "unrestricted",
-    gitWritePolicy: "unrestricted",
-    systemPromptSnippet:
-      "You are in FULL AUTO mode. Act autonomously: design, implement, review, and " +
-      "commit/push as needed to complete the task, unless the user's prompt asks you " +
-      "to be more careful.",
-  },
-  coordinator: {
-    name: "coordinator",
-    label: "Coordinator",
-    description:
-      "Delegate work to subagents instead of doing it yourself; escalate subagent " +
-      "questions to the user; err on the side of self-doubt.",
-    editPolicy: "blocked",
-    gitWritePolicy: "blocked",
-    // Static fallback only - the live snippet actually injected each turn is
-    // computed fresh by buildCoordinatorSnippet() so it can include an
-    // up-to-date list of real subagent names. See lastCoordinatorSnippet.
-    systemPromptSnippet: COORDINATOR_BASE_SNIPPET,
-  },
-};
-
-const DEFAULT_MODE = "pair";
+import { discoverAgents } from "../subagent/agents.ts";
+import { COORDINATOR_BASE_SNIPPET, DEFAULT_MODE, MODES, parseModeArgs, SESSION_ONLY_FLAG, type AgentMode } from "./policy.ts";
 
 function isQwen3(model: Model | undefined): boolean {
   if (!model) return false;
@@ -396,9 +313,15 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("mode", {
-    description: "Switch agent mode (pair | auto | coordinator)",
+    description:
+      `Switch agent mode (pair | auto | coordinator | tour). Add ${SESSION_ONLY_FLAG} to switch ` +
+      "for this session only, without changing the persisted default for future sessions/projects.",
     handler: async (args, ctx) => {
-      const requested = args.trim().toLowerCase();
+      const { name: requested, persist, error } = parseModeArgs(args);
+      if (error) {
+        ctx.ui.notify(error, "error");
+        return;
+      }
       if (!requested) {
         ctx.ui.notify(
           `Current mode: ${currentMode.label}. Available: ${Object.keys(MODES).join(", ")}`,
@@ -410,7 +333,7 @@ export default function (pi: ExtensionAPI) {
       // even if the active model happens to be qwen3.
       autoSwitchedForModel = false;
       modeBeforeAutoSwitch = undefined;
-      await setMode(requested, ctx);
+      await setMode(requested, ctx, { persist });
     },
   });
 

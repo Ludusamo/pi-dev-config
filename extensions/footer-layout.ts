@@ -12,7 +12,7 @@
  * Mode comes from the agent-modes extension's footer status entry
  * ("agent-mode" -> "Mode: <label>", set via ctx.ui.setStatus). That status
  * text is exposed to any footer through footerData.getExtensionStatuses(),
- * so no direct coupling to agent-modes.ts is needed.
+ * so no direct coupling to the agent-modes extension is needed.
  */
 
 import { isAbsolute, relative, resolve, sep } from "node:path";

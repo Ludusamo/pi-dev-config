@@ -1,0 +1,162 @@
+/**
+ * Pure mode data and helpers for the agent-modes extension, kept in their own
+ * dependency-light module so other extensions (codebase-tour) and the test
+ * harness can import them without pulling in index.ts's runtime deps
+ * (@earendil-works/pi-coding-agent, the subagent discovery module), which
+ * aren't resolvable outside the pi runtime's own module loader.
+ */
+
+/**
+ * A mode bundles the policies that govern how autonomously the agent behaves:
+ * - which built-in tools are available (e.g. edit/write removed in pair mode)
+ * - whether git write commands (commit/push) are allowed
+ * - a system prompt snippet describing the mode's behavior to the model
+ */
+export interface AgentMode {
+  name: string;
+  label: string;
+  description: string;
+  editPolicy: "blocked" | "unrestricted";
+  gitWritePolicy: "blocked" | "unrestricted";
+  systemPromptSnippet: string;
+}
+
+export const COORDINATOR_BASE_SNIPPET =
+  "You are in COORDINATOR mode. You are a coordinator, not an implementer:\n" +
+  "- Do not do substantial thinking, research, or implementation work yourself. " +
+  "Break the user's request into concrete tasks and delegate each one to a " +
+  "subagent (the subagent tool). Let subagents do the heavy lifting.\n" +
+  "- Built-in file edit/write and git commit/push are blocked for you directly in " +
+  "this mode - that is intentional. Have a subagent make file changes and commits; " +
+  "only use light read-only tools yourself to route work or sanity-check results.\n" +
+  "- If a subagent's response contains a question, asks for clarification, or " +
+  "seems unsure how to proceed, do NOT answer on its behalf and do NOT guess. Stop, " +
+  "relay the question to the user (ask them directly), and wait for their answer " +
+  "before resuming or re-dispatching the subagent.\n" +
+  "- Default to self-doubt: assume your own unaided judgement is more likely wrong " +
+  "than a subagent's focused output or the user's clarification. Prefer verifying " +
+  "through a subagent, or checking with the user, over confidently asserting an " +
+  "answer yourself.\n" +
+  "- When unsure whether something needs user input or another subagent, err on the " +
+  "side of asking rather than proceeding unilaterally.\n" +
+  "- Default to one-shot delegation (single/parallel/chain) - it's simpler and " +
+  "leaves no stale state behind. Reach for persistent open/send/close only for " +
+  "genuine multi-turn work against the same accumulated context, e.g. iterative " +
+  "code review: open a reviewer on a diff, dispatch a one-shot worker to make " +
+  "fixes, then send the updated diff back to that same reviewer handle to verify " +
+  "the prior findings. Close a session once its work is done; use list if you " +
+  "lose track of a handle; never invent or guess a handle - only use ones " +
+  "returned by open or list.";
+
+export const MODES: Record<string, AgentMode> = {
+  pair: {
+    name: "pair",
+    label: "Pair Coding",
+    description:
+      "Design and discuss together. Never edit files or commit/push without explicit user permission.",
+    editPolicy: "blocked",
+    gitWritePolicy: "blocked",
+    systemPromptSnippet:
+      "You are in PAIR CODING mode. Spend time designing with the user, offering " +
+      "suggestions, and proposing code snippets. Do not edit or write files, and do " +
+      "not commit or push, unless the user explicitly asks you to.",
+  },
+  auto: {
+    name: "auto",
+    label: "Full Auto",
+    description:
+      "Fully autonomous: design, implement, review, and commit without needing to check in.",
+    editPolicy: "unrestricted",
+    gitWritePolicy: "unrestricted",
+    systemPromptSnippet:
+      "You are in FULL AUTO mode. Act autonomously: design, implement, review, and " +
+      "commit/push as needed to complete the task, unless the user's prompt asks you " +
+      "to be more careful.",
+  },
+  coordinator: {
+    name: "coordinator",
+    label: "Coordinator",
+    description:
+      "Delegate work to subagents instead of doing it yourself; escalate subagent " +
+      "questions to the user; err on the side of self-doubt.",
+    editPolicy: "blocked",
+    gitWritePolicy: "blocked",
+    // Static fallback only - the live snippet actually injected each turn is
+    // computed fresh by buildCoordinatorSnippet() in index.ts so it can include
+    // an up-to-date list of real subagent names.
+    systemPromptSnippet: COORDINATOR_BASE_SNIPPET,
+  },
+  tour: {
+    name: "tour",
+    label: "Codebase Tour",
+    description:
+      "Guided, read-only walkthrough of the codebase. No edits or git writes; use the " +
+      "codebase-tour extension's tools to plan, advance, and record notes.",
+    editPolicy: "blocked",
+    gitWritePolicy: "blocked",
+    systemPromptSnippet:
+      "You are in CODEBASE TOUR mode. You are guiding the user through a read-only, " +
+      "structured walkthrough of this codebase:\n" +
+      "- Built-in file edit/write and git commit/push are blocked for you in this mode - " +
+      "that is intentional. If the user wants an actual change made, tell them to switch " +
+      "modes (e.g. /mode pair or /mode auto) rather than trying to work around the block.\n" +
+      "- Use the codebase-tour extension's tools (tour_plan, tour_advance, tour_note, tour_show, " +
+      "tour_status, tour_end) to plan and track the tour - don't just narrate a walkthrough " +
+      "from memory without recording it, or the user loses their place if the session ends.\n" +
+      "- Teaching style is mixed Socratic/explain-first: explain what a stop's code does and " +
+      "why it's shaped that way, then ask a short question that checks understanding or " +
+      "invites the user to predict/explore before moving on - don't just lecture, and don't " +
+      "just quiz. Read the user's signals (short answers, 'just tell me', deep follow-ups) " +
+      "and shift the balance accordingly. See the codebase-tour skill for the full loop.\n" +
+      "- If a tour is already in progress (see the injected tour status), resume it at its " +
+      "current stop instead of restarting from scratch - unless the user explicitly asked for " +
+      "a new one (e.g. by running /tour start, whose kickoff message says so), in which case " +
+      "start fresh and replace it.",
+  },
+};
+
+export const DEFAULT_MODE = "pair";
+
+/** Name of the read-only tour mode, exported so other extensions (codebase-tour) don't have to hardcode it. */
+export const TOUR_MODE_NAME = "tour";
+
+/** Flag on /mode that switches for the current session only, without persisting as the default for future sessions/projects. */
+export const SESSION_ONLY_FLAG = "--session";
+
+export interface ModePolicy {
+  editPolicy: AgentMode["editPolicy"];
+  gitWritePolicy: AgentMode["gitWritePolicy"];
+}
+
+/**
+ * Pure lookup of a mode's edit/git-write policy, exported so other extensions and tests can
+ * verify what a mode actually enforces (e.g. that tour mode blocks edits) instead of relying on
+ * a hardcoded mode name string staying in sync by convention.
+ */
+export function getModePolicy(name: string): ModePolicy | undefined {
+  const mode = MODES[name];
+  if (!mode) return undefined;
+  return { editPolicy: mode.editPolicy, gitWritePolicy: mode.gitWritePolicy };
+}
+
+/**
+ * Pure parse of `/mode` command args: a mode name plus an optional SESSION_ONLY_FLAG.
+ * Unknown `--flags` (e.g. a typo like `--sesion`) are reported as an error rather than
+ * silently ignored - persist defaults to true, so a typo'd flag would otherwise fail open
+ * into persisting the mode switch as the default for every future session/project, which
+ * is the opposite of what someone typing a `--session`-like flag wants.
+ */
+export function parseModeArgs(args: string): { name: string; persist: boolean; error?: string } {
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const unknownFlags = tokens.filter((t) => t.startsWith("--") && t !== SESSION_ONLY_FLAG);
+  if (unknownFlags.length > 0) {
+    return {
+      name: "",
+      persist: true,
+      error: `Unknown flag(s): ${unknownFlags.join(", ")}. The only supported flag is ${SESSION_ONLY_FLAG}.`,
+    };
+  }
+  const persist = !tokens.includes(SESSION_ONLY_FLAG);
+  const name = (tokens.find((t) => !t.startsWith("--")) ?? "").toLowerCase();
+  return { name, persist };
+}

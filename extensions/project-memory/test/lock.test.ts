@@ -21,10 +21,16 @@ test("acquireLock succeeds when no lock exists, and blocks a second acquirer unt
 			return h;
 		});
 
-		await new Promise((resolve) => setTimeout(resolve, 100));
-		assert.equal(secondAcquired, false, "second acquirer should still be waiting");
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			assert.equal(secondAcquired, false, "second acquirer should still be waiting");
+		} finally {
+			// Always release, even if the assertion above fails, so the still-pending
+			// secondAttempt isn't left to reject on its own timeout as an unhandled
+			// rejection after this test has already exited.
+			await handle.release();
+		}
 
-		await handle.release();
 		const secondHandle = await secondAttempt;
 		assert.equal(secondAcquired, true);
 		await secondHandle.release();
