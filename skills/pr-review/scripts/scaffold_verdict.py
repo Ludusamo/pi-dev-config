@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import prconfig  # noqa: E402
+from mdtable import format_tables  # noqa: E402
 
 CODE = re.compile(r"\.(java|kt|py|ts|tsx|js|go|sql|rb|cs)$")
 RULE = re.compile(r"\bR-\d{3}\b")
@@ -158,7 +159,7 @@ def build(artifacts):
             "| Rule  | Scan said | Reviewer |",
             "| ----- | --------- | -------- |",
         ]
-        L += [f"| {r:<5} | {v:<9} | <fill>   |" for r, v in rows]
+        L += [f"| {r} | {v} | <fill> |" for r, v in rows]
         if na:
             L += ["", f"<!-- not applicable, no decision needed: {', '.join(na)} -->"]
     else:
@@ -166,7 +167,8 @@ def build(artifacts):
               "step was skipped; say so here. -->"]
 
     L.append("")
-    return "\n".join(L), {"files": len(files), "scan_rows": len(rows)}
+    # Align before writing - this file is read in a plain text editor.
+    return format_tables("\n".join(L)), {"files": len(files), "scan_rows": len(rows)}
 
 
 def main():

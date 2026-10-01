@@ -8,11 +8,11 @@ This artifact separates them so the reviewer does not have to find them by scrol
 
 ## Inputs
 
-| Input           | Where it comes from                                           |
-| --------------- | ------------------------------------------------------------- |
+| Input           | Where it comes from                                          |
+| --------------- | ------------------------------------------------------------ |
 | `classify.json` | `.signals.top_clusters`, `.signals.residue`, `.signals.mechanical_ratio` |
-| `range`         | `review_worktree.py` JSON                                     |
-| worktrees       | `.worktrees.base`, `.worktrees.head`                          |
+| `range`         | `review_worktree.py` JSON                                    |
+| worktrees       | `.worktrees.base`, `.worktrees.head`                         |
 
 `classify.py` has already clustered the hunks.
 `.signals.top_clusters` holds the repeated token substitutions and their counts; `.signals.residue` holds the files with hunks that did not fit any cluster.

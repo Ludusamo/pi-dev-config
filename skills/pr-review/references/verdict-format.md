@@ -162,14 +162,14 @@ Classification chose the depth, so this is where that choice becomes visible and
 
 Every rule the scan reported on, and what the reviewer decided.
 
-| Reviewer value   | Meaning                                                |
-| ---------------- | ------------------------------------------------------ |
-| `adopted`        | Became a review point above                             |
-| `false positive` | Fired and was wrong - the retro counts these            |
-| `agreed`         | Correct, but not worth raising with the author          |
-| `checked, ok`    | A `human` rule the reviewer verified and found fine     |
-| `not reached`    | A `human` rule the reviewer did not get to              |
-| `missed`         | Scan said pass, but the thing it checks for is there    |
+| Reviewer value   | Meaning                                              |
+| ---------------- | ---------------------------------------------------- |
+| `adopted`        | Became a review point above                          |
+| `false positive` | Fired and was wrong - the retro counts these         |
+| `agreed`         | Correct, but not worth raising with the author       |
+| `checked, ok`    | A `human` rule the reviewer verified and found fine  |
+| `not reached`    | A `human` rule the reviewer did not get to           |
+| `missed`         | Scan said pass, but the thing it checks for is there |
 
 This table is the single highest-value part of the file for the retro.
 `false positive` twice for the same rule retires it; `not reached` repeatedly means the rule is impractical as written.

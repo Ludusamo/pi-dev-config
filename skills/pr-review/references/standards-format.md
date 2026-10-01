@@ -38,10 +38,10 @@ R-001: One-line imperative claim
 Per-repo knobs, one `key: value` bullet each.
 Currently honoured:
 
-| Key                     | Meaning                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| `subsystem_re`          | Regex whose first capture group names the subsystem a path belongs to.           |
-| `shared_contract_globs` | Comma-separated globs for types whose modification forces consumers to follow.   |
+| Key                     | Meaning                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `subsystem_re`          | Regex whose first capture group names the subsystem a path belongs to. |
+| `shared_contract_globs` | Comma-separated globs for types whose modification forces consumers to follow. |
 
 `subsystem_re` matters more than it looks.
 It is what distinguishes "contained" from "spreads", which is the deep-cut test.
@@ -80,11 +80,11 @@ If the sentence needs an "and", it is two rules - split it, otherwise a partial 
 **Severity.**
 What a failure means for the merge:
 
-| Severity    | Meaning                                                      |
-| ----------- | ------------------------------------------------------------ |
-| `blocker`   | Do not merge until resolved.                                  |
-| `nitpick`   | Worth a comment, author's discretion.                         |
-| `follow-up` | Fine to merge, needs a ticket.                                |
+| Severity    | Meaning                               |
+| ----------- | ------------------------------------- |
+| `blocker`   | Do not merge until resolved.          |
+| `nitpick`   | Worth a comment, author's discretion. |
+| `follow-up` | Fine to merge, needs a ticket.        |
 
 Severity belongs to the rule because it is a standing policy decision.
 An individual finding may be downgraded in the verdict, and that downgrade is a signal the retro should notice.
@@ -141,11 +141,11 @@ Before trusting a new `# Risky Surfaces` list or `shared_contract_globs` setting
 
 Rough targets:
 
-| Signal                    | Healthy hit rate | If it is higher                                           |
-| ------------------------- | ---------------- | --------------------------------------------------------- |
-| Risky surface (whole list)| 10-30%           | Cut the surfaces that are the repo's normal working area.   |
-| Deep cut                  | 10-30%           | Narrow `shared_contract_globs`.                             |
-| Full-depth (4 artifacts)  | around 20%       | Both of the above.                                          |
+| Signal                     | Healthy hit rate | If it is higher                                           |
+| -------------------------- | ---------------- | --------------------------------------------------------- |
+| Risky surface (whole list) | 10-30%           | Cut the surfaces that are the repo's normal working area. |
+| Deep cut                   | 10-30%           | Narrow `shared_contract_globs`.                           |
+| Full-depth (4 artifacts)   | around 20%       | Both of the above.                                        |
 
 A surface that fires on most MRs is not a warning, it is a description of the repo.
 When that happens the concern usually belongs in a rule, which is targeted and produces a specific verdict, rather than in a risky surface, which just dials up the artifact count.

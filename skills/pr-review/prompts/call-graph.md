@@ -7,11 +7,11 @@ Its purpose is blast radius - showing the reviewer which untouched code is never
 
 ## Inputs
 
-| Input           | Where it comes from                                                |
-| --------------- | ------------------------------------------------------------------- |
+| Input           | Where it comes from                                          |
+| --------------- | ------------------------------------------------------------ |
 | `head_worktree` | `.worktrees.head` - resolve callers and callees here, never in the main repo, which sits on an unrelated branch |
 | `classify.json` | `.signals.shared_contracts[]` already has consumer counts and a sample |
-| `range`         | the changed symbols                                                 |
+| `range`         | the changed symbols                                          |
 
 Use `git grep -n -w <symbol>` inside `head_worktree`.
 Start from `.signals.shared_contracts[].sample` where it exists rather than rediscovering it.

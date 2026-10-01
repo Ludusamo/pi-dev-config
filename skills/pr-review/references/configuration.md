@@ -4,10 +4,10 @@ Where reviews are stored, and how to change it.
 
 ## Two roots
 
-| Root            | Holds                                   | Lifetime                      | Default            |
-| --------------- | --------------------------------------- | ----------------------------- | ------------------ |
-| `worktree_root` | base/head git checkouts                 | Deleted after the review       | `~/reviews`        |
-| `artifact_root` | guides, scans, verdicts, `record.json`  | Permanent - the retro reads across months | `~/notes/pr-reviews` |
+| Root            | Holds                                  | Lifetime                                  | Default              |
+| --------------- | -------------------------------------- | ----------------------------------------- | -------------------- |
+| `worktree_root` | base/head git checkouts                | Deleted after the review                  | `~/reviews`          |
+| `artifact_root` | guides, scans, verdicts, `record.json` | Permanent - the retro reads across months | `~/notes/pr-reviews` |
 
 They are separate on purpose.
 Worktrees are bulky and disposable; artifacts are small and durable.
@@ -28,10 +28,10 @@ Run it first whenever artifacts end up somewhere unexpected.
 
 ## Config file
 
-| Platform | Path                                                          |
-| -------- | ------------------------------------------------------------- |
+| Platform | Path                                                         |
+| -------- | ------------------------------------------------------------ |
 | POSIX    | `$XDG_CONFIG_HOME/pr-review/config.json`, else `~/.config/pr-review/config.json` |
-| Windows  | `%APPDATA%\pr-review\config.json`                             |
+| Windows  | `%APPDATA%\pr-review\config.json`                            |
 
 ```json
 {

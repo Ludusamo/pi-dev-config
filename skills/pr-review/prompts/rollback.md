@@ -6,11 +6,11 @@ One question: if this is wrong in production, how fast can it be undone, and wha
 
 ## Inputs
 
-| Input           | Where it comes from                                        |
-| --------------- | ----------------------------------------------------------- |
+| Input           | Where it comes from                                          |
+| --------------- | ------------------------------------------------------------ |
 | `classify.json` | `.signals.risky_matches`, `.signals.migrations`, `.signals.contract_docs_changed` |
-| `range`         | the diff                                                    |
-| `head_worktree` | deployment and config files                                 |
+| `range`         | the diff                                                     |
+| `head_worktree` | deployment and config files                                  |
 
 Read the repository's own deployment documentation before writing anything.
 Rollback mechanics are repo-specific and guessing at them produces confidently wrong advice, which is worse here than in any other artifact.

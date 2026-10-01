@@ -7,14 +7,14 @@ If rules are already in context, the map will be written around them and the hum
 
 ## Inputs
 
-| Input            | Where it comes from                        |
-| ---------------- | ------------------------------------------ |
-| `repo_path`      | `review_worktree.py` JSON `.repo_path`     |
-| `range`          | `.range`                                   |
-| `base_worktree`  | `.worktrees.base`                          |
-| `head_worktree`  | `.worktrees.head`                          |
-| `classify.json`  | written by `classify.py`                   |
-| intent           | MR description, commit messages, or the human if both are useless |
+| Input           | Where it comes from                                          |
+| --------------- | ------------------------------------------------------------ |
+| `repo_path`     | `review_worktree.py` JSON `.repo_path`                       |
+| `range`         | `.range`                                                     |
+| `base_worktree` | `.worktrees.base`                                            |
+| `head_worktree` | `.worktrees.head`                                            |
+| `classify.json` | written by `classify.py`                                     |
+| intent          | MR description, commit messages, or the human if both are useless |
 
 Read the diff with `git diff <range>`.
 Read whole files from `head_worktree`, and their previous state from `base_worktree`.
@@ -94,11 +94,11 @@ whether something was deliberate. Omit the section if empty.>
 
 The distinction between a map and a review is phrasing, so it is worth being exact.
 
-| Instead of                                | Write                                                               |
-| ----------------------------------------- | ------------------------------------------------------------------- |
-| "This swallows the exception"             | "The catch block at :88 does not rethrow or log - intended?"          |
-| "Good use of the existing validator"      | "Reuses `FilterDtoValidator` rather than adding a new check"          |
-| "Missing test coverage for the null path" | "The null branch at :42 has no corresponding test in this diff"       |
-| "The naming here is confusing"            | "`fetchX` and `getX` both exist after this change"                    |
+| Instead of                                | Write                                                        |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| "This swallows the exception"             | "The catch block at :88 does not rethrow or log - intended?" |
+| "Good use of the existing validator"      | "Reuses `FilterDtoValidator` rather than adding a new check" |
+| "Missing test coverage for the null path" | "The null branch at :42 has no corresponding test in this diff" |
+| "The naming here is confusing"            | "`fetchX` and `getX` both exist after this change"           |
 
 Each right-hand phrasing states a verifiable fact and leaves the judgement to the reviewer.

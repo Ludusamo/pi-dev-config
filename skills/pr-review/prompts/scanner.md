@@ -11,12 +11,12 @@ It becomes one only if the human adopts it during the review phase - severity an
 
 ## Inputs
 
-| Input                 | Where it comes from                      |
-| --------------------- | ---------------------------------------- |
-| `REVIEW_STANDARDS.md` | repository root                          |
-| `repo_path`, `range`  | `review_worktree.py` JSON                |
+| Input                 | Where it comes from                        |
+| --------------------- | ------------------------------------------ |
+| `REVIEW_STANDARDS.md` | repository root                            |
+| `repo_path`, `range`  | `review_worktree.py` JSON                  |
 | `head_worktree`       | `.worktrees.head`, for reading whole files |
-| `classify.json`       | written by `classify.py`                 |
+| `classify.json`       | written by `classify.py`                   |
 
 ## Scope
 
@@ -29,8 +29,8 @@ But do not leave them bare either.
 For each, supply a **pointer without a verdict**: where in the diff the relevant evidence would be, or where the author appears to have addressed it, so the human starts their check somewhere instead of from nothing.
 This is the single biggest time saving available on human rules, and it costs nothing in independence as long as the pointer stays a location rather than a conclusion.
 
-| Write                                                                 | Not                                      |
-| --------------------------------------------------------------------- | ---------------------------------------- |
+| Write                                                        | Not                                        |
+| ------------------------------------------------------------ | ------------------------------------------ |
 | "`FooTest.java:797` claims the keys were transcribed from a live payload on 2026-09-29, naming two source trades." | "R-004 passes, the author transcribed it." |
 | "No allowlist file changed; `Foo.java:20` states this surface has no filter/sort. Likely n/a - confirm." | "R-010 is not applicable."                 |
 
@@ -50,12 +50,12 @@ For each in-scope rule:
 
 ### Verdicts
 
-| Verdict | Meaning                                                                 |
-| ------- | ----------------------------------------------------------------------- |
-| `pass`  | The check holds, and you can cite where.                                 |
-| `fail`  | The check is violated, and you can cite where.                           |
+| Verdict | Meaning                                                      |
+| ------- | ------------------------------------------------------------ |
+| `pass`  | The check holds, and you can cite where.                     |
+| `fail`  | The check is violated, and you can cite where.               |
 | `undet` | Triggered, but you cannot establish either answer from available evidence. |
-| `n/a`   | `Applies when` did not trigger.                                          |
+| `n/a`   | `Applies when` did not trigger.                              |
 
 **`undet` is a first-class answer, not a failure of effort.**
 Use it whenever the evidence is outside the diff and the worktree - author intent, a live upstream payload, a decision made in a meeting.
@@ -67,6 +67,11 @@ If you cannot cite, the verdict is `undet`.
 
 Two sentences maximum per rule.
 These are read in a batch; length is friction.
+
+Keep the evidence cell short enough to read in a plain text editor - a citation and a clause, well under 120 characters.
+If a finding genuinely needs a paragraph, put the citation in the table and the explanation in prose beneath it.
+A 400-character table cell is unreadable unrendered, which is how these are usually read.
+Column-align every table.
 
 ## Adjudication
 

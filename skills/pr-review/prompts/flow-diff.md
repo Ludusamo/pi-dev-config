@@ -7,11 +7,11 @@ This is the artifact that answers "what actually changes at runtime", which a di
 
 ## Inputs
 
-| Input           | Where it comes from                                  |
-| --------------- | ----------------------------------------------------- |
-| `base_worktree` | `.worktrees.base` - read whole files as they were     |
-| `head_worktree` | `.worktrees.head` - read whole files as they are      |
-| `range`         | for `git diff`                                        |
+| Input           | Where it comes from                                          |
+| --------------- | ------------------------------------------------------------ |
+| `base_worktree` | `.worktrees.base` - read whole files as they were            |
+| `head_worktree` | `.worktrees.head` - read whole files as they are             |
+| `range`         | for `git diff`                                               |
 | `classify.json` | `.signals.residue` and `.signals.subsystems` point at where the behaviour moved |
 
 Read both worktrees.

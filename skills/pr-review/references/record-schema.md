@@ -86,12 +86,12 @@ It is the only true measure of whether the process works, and the only field tha
 
 The record is written by the agent but is not the agent's opinion.
 
-| Source | Fields |
-| ------ | ------ |
-| `classify.json` | `classification`, `files`, `hunks`, `mechanical_ratio` |
-| `review_worktree.py` | `id`, `repo`, `head_sha`, `passes` |
-| Mechanical | `date`, `artifacts_generated` |
-| **The reviewer** | `verdict`, every `points[].severity`, every `points[].text`, `scan.false_positives`, `scan.missed`, `artifacts_used`, `not_reviewed`, `wall_minutes` |
+| Source               | Fields                                                       |
+| -------------------- | ------------------------------------------------------------ |
+| `classify.json`      | `classification`, `files`, `hunks`, `mechanical_ratio`       |
+| `review_worktree.py` | `id`, `repo`, `head_sha`, `passes`                           |
+| Mechanical           | `date`, `artifacts_generated`                                |
+| **The reviewer**     | `verdict`, every `points[].severity`, every `points[].text`, `scan.false_positives`, `scan.missed`, `artifacts_used`, `not_reviewed`, `wall_minutes` |
 
 Nothing in the reviewer row may be inferred.
 A severity the agent chose, or a `false_positives` list it decided on its own, corrupts the retro at the exact point the retro is supposed to be measuring the agent.

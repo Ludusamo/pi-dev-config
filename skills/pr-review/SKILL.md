@@ -8,11 +8,11 @@ description: Structured PR/MR review. Classifies a change by blast radius and ri
 A review pipeline that does the mechanical work up front so the human can spend their attention on judgement.
 Three phases, run separately:
 
-| Phase    | When                       | Produces                                   |
-| -------- | -------------------------- | ------------------------------------------ |
-| `prep`   | Before reading the diff    | Artifacts on disk: guide, scan, diagrams    |
-| `review` | Sitting down to review     | The verdict, in paste-ready blocks          |
-| `retro`  | Periodically, across many  | Proposed amendments to REVIEW_STANDARDS.md  |
+| Phase    | When                      | Produces                                   |
+| -------- | ------------------------- | ------------------------------------------ |
+| `prep`   | Before reading the diff   | Artifacts on disk: guide, scan, diagrams   |
+| `review` | Sitting down to review    | The verdict, in paste-ready blocks         |
+| `retro`  | Periodically, across many | Proposed amendments to REVIEW_STANDARDS.md |
 
 Default to `prep` when the phase is not stated and no artifacts exist yet; default to `review` when they do.
 
@@ -31,6 +31,11 @@ Every review point, its severity, and the overall verdict come from the reviewer
 You format what they said into paste-ready blocks and nothing more.
 A verdict you wrote is a review you performed, which is the one thing this process exists to prevent.
 
+**Tables are column-aligned.**
+These artifacts are read in a plain text editor far more often than they are rendered, and a ragged table is hard work there.
+After writing any artifact, run `python3 scripts/mdtable.py <file>` to align it.
+Keep cells short enough to stay readable - put detail in prose under the table, not in a 400-character cell.
+
 **Diagrams are ASCII, never mermaid.**
 Plain ASCII in a fenced block, assuming a monospace font, under 90 columns.
 Artifacts get read in terminals, diff views and GitLab comment boxes, and a mermaid block that does not render is worse than no diagram at all.
@@ -45,10 +50,10 @@ Once rules are in context, every description of the change is coloured by them.
 Scripts are plain `python3` + `git`, no dependencies.
 Paths below are relative to this skill directory.
 
-| Platform             | Command            |
-| -------------------- | ------------------ |
-| Linux / macOS / WSL  | `python3 scripts/` |
-| Windows PowerShell   | `py -3 scripts/`   |
+| Platform            | Command            |
+| ------------------- | ------------------ |
+| Linux / macOS / WSL | `python3 scripts/` |
+| Windows PowerShell  | `py -3 scripts/`   |
 
 Run from inside the repository being reviewed.
 
@@ -113,6 +118,12 @@ For each entry in `.artifacts` from classify.json other than `guide`, run the ma
 These are independent.
 Run them in parallel if the host supports it, sequentially otherwise.
 
+After writing each artifact, align its tables:
+
+```
+python3 scripts/mdtable.py <artifacts>/*.md
+```
+
 If a prompt file does not exist yet, skip that artifact and name it in the report as not generated.
 Never improvise an artifact without its prompt - an inconsistent artifact is worse than a missing one, because the reviewer cannot tell which they are holding.
 
@@ -144,15 +155,15 @@ The order is the point: it keeps the human's first impression their own.
 The reviewer dictates; you record.
 The line between the two is narrow enough to be worth stating precisely.
 
-| You may                                                        | You must not                                                      |
-| -------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Format their words into the block structure                     | Rewrite, polish, soften or sharpen their wording                    |
-| Resolve a `file:line` they described in prose                   | Add a point they did not raise                                      |
-| Propose a RuleID tag for a point, for them to confirm           | Assign severity - that is theirs                                    |
-| Point out that a scan finding was never ruled on                | Carry a scan finding into the verdict unadopted                     |
-| Ask which of two readings of an ambiguous remark they meant     | Pick the reading that seems more likely                             |
-| Note that no overall verdict has been stated yet                | Infer the verdict from the points                                   |
-| Flag a `human` rule they have not worked through                | Record it as satisfied because nothing contradicted it              |
+| You may                                                     | You must not                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------ |
+| Format their words into the block structure                 | Rewrite, polish, soften or sharpen their wording       |
+| Resolve a `file:line` they described in prose               | Add a point they did not raise                         |
+| Propose a RuleID tag for a point, for them to confirm       | Assign severity - that is theirs                       |
+| Point out that a scan finding was never ruled on            | Carry a scan finding into the verdict unadopted        |
+| Ask which of two readings of an ambiguous remark they meant | Pick the reading that seems more likely                |
+| Note that no overall verdict has been stated yet            | Infer the verdict from the points                      |
+| Flag a `human` rule they have not worked through            | Record it as satisfied because nothing contradicted it |
 
 Keep their phrasing verbatim.
 A reviewer recognises their own words when the comment lands in GitLab, and a reworded point is one they have to re-verify before posting.
