@@ -171,6 +171,21 @@ Every rule the scan reported on, and what the reviewer decided.
 | `not reached`    | A `human` rule the reviewer did not get to           |
 | `missed`         | Scan said pass, but the thing it checks for is there |
 
+### Which disposition fits what the scan said
+
+Not every pairing is meaningful, and the parser rejects the ones that are not.
+The mistake that matters is marking a **failure** as `checked, ok`: that reads as agreeing the rule's check is satisfied while the scan says it was violated, and it quietly drops the finding from `false_positives` - the retro's only evidence for retiring a noisy rule.
+
+| Scan said  | Valid dispositions                                           |
+| ---------- | ------------------------------------------------------------ |
+| `fail`     | `adopted`, `false positive`, `agreed`                        |
+| `undet`    | `adopted`, `false positive`, `agreed`, `checked, ok`, `not reached` |
+| `pass`     | `agreed`, `missed`                                           |
+| `deferred` | `adopted`, `checked, ok`, `not reached`                      |
+
+For a failure you disagree with, the choice is between `false positive` (the rule was wrong) and `agreed` (the rule was right, you just are not raising it with the author).
+They look similar in the moment and diverge completely over time: one retires the rule, the other keeps it.
+
 This table is the single highest-value part of the file for the retro.
 `false positive` twice for the same rule retires it; `not reached` repeatedly means the rule is impractical as written.
 It is also the only place where the agent's scan is graded, which is why the reviewer fills it and the agent does not.

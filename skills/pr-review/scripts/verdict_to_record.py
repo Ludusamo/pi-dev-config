@@ -37,6 +37,29 @@ POINT = re.compile(
     r"`(?P<rule>[^`]+)`\s*$"
 )
 FILE_HEADING = re.compile(r"^###\s+(?P<path>\S+)\s*$")
+TITLE = re.compile(r"^#\s+Verdict:\s*\S+\s*-\s*(?P<verdict>.+?)\s*$")
+
+# Which dispositions make sense for what the scan said. A failure marked
+# "checked, ok" reads as agreement with the rule's check while the scan says it
+# was violated - and it silently drops the finding from false_positives, which
+# is the retro's only evidence for retiring a noisy rule.
+COMPATIBLE = {
+    "fail": {"adopted", "false positive", "agreed"},
+    "undet": {"adopted", "false positive", "agreed", "checked, ok", "not reached"},
+    "pass": {"agreed", "missed"},
+    "deferred": {"adopted", "checked, ok", "not reached"},
+}
+HINT = {
+    ("fail", "checked, ok"): "use 'false positive' if the rule was wrong, "
+                              "'agreed' if it was right but not worth raising, "
+                              "'adopted' if you raised it",
+    ("pass", "checked, ok"): "a passing rule needs no human check - use 'agreed', "
+                             "or 'missed' if it should have failed",
+    ("pass", "adopted"): "the scan passed this rule; if you raised it anyway, "
+                         "the scan 'missed' it",
+    ("deferred", "false positive"): "a deferred rule issued no verdict to be wrong "
+                                    "- use 'checked, ok' or 'not reached'",
+}
 SECTION = re.compile(r"^##\s+(?P<name>.+?)\s*$")
 TABLE_ROW = re.compile(r"^\|(?P<cells>.+)\|\s*$")
 
@@ -116,11 +139,27 @@ def parse(path):
             rule, said, decided = cells[0], cells[1].lower(), cells[2].lower()
             if decided not in DISPOSITIONS:
                 errors.append(f"line {i+1}: disposition {decided!r} not one of {sorted(DISPOSITIONS)}")
+            elif said in COMPATIBLE and decided not in COMPATIBLE[said]:
+                hint = HINT.get((said, decided))
+                errors.append(
+                    f"line {i+1}: {rule} scan said {said!r} but disposition is {decided!r}"
+                    + (f" - {hint}" if hint else ""))
             scan_rows.append({"rule": rule, "scan": said, "reviewer": decided})
 
+    title_verdict = next(
+        (m.group("verdict").strip().lower()
+         for line in body.splitlines() if (m := TITLE.match(line))), None)
+
     verdict = str(meta.get("verdict", NOT_STATED)).strip()
-    if verdict == NOT_STATED or verdict not in VERDICTS:
-        errors.append(f"frontmatter verdict {verdict!r} is not one of {sorted(VERDICTS)}")
+    if verdict not in VERDICTS:
+        if title_verdict in VERDICTS:
+            errors.append(
+                f"frontmatter verdict is {verdict!r} but the title says "
+                f"{title_verdict!r} - the record reads the frontmatter, so set it there")
+        else:
+            errors.append(f"frontmatter verdict {verdict!r} is not one of {sorted(VERDICTS)}")
+    elif title_verdict in VERDICTS and title_verdict != verdict:
+        errors.append(f"title says {title_verdict!r} but frontmatter says {verdict!r}")
 
     record = {
         "id": meta.get("id"),
@@ -149,8 +188,18 @@ def parse(path):
         except ValueError:
             errors.append(f"wall_minutes {meta['wall_minutes']!r} is not a number")
 
+    warnings = []
+    if not record["not_reviewed"]:
+        warnings.append("'Not reviewed' is empty - classification chose the depth, so "
+                        "what you skipped is the part worth recording")
+    if "## summary comment" in body.lower() and not re.search(
+            r"##\s+Summary comment\s*\n(.|\n)*?```", body):
+        warnings.append("no summary comment block - nothing to paste into the MR overview")
+    if not points and verdict == "request changes":
+        warnings.append("verdict is 'request changes' but there are no review points")
+
     unposted = [p for p in points if not p["posted"]]
-    return record, errors, unposted
+    return record, errors, unposted, warnings
 
 
 def extract_block(lines, start):
@@ -180,7 +229,10 @@ def main():
     ap.add_argument("--check", action="store_true", help="validate without writing")
     args = ap.parse_args()
 
-    record, errors, unposted = parse(args.verdict)
+    record, errors, unposted, warnings = parse(args.verdict)
+
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
 
     if errors:
         print("verdict.md is not complete:", file=sys.stderr)
