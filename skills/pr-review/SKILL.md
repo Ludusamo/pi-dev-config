@@ -8,11 +8,11 @@ description: Structured PR/MR review. Classifies a change by blast radius and ri
 A review pipeline that does the mechanical work up front so the human can spend their attention on judgement.
 Three phases, run separately:
 
-| Phase    | When                      | Produces                                   |
-| -------- | ------------------------- | ------------------------------------------ |
-| `prep`   | Before reading the diff   | Artifacts on disk: guide, scan, diagrams   |
-| `review` | Sitting down to review    | The verdict, in paste-ready blocks         |
-| `retro`  | Periodically, across many | Proposed amendments to REVIEW_STANDARDS.md |
+| Phase    | When                      | Produces                                                 |
+| -------- | ------------------------- | -------------------------------------------------------- |
+| `prep`   | Before reading the diff   | Artifacts on disk: guide, scan, diagrams, notes scaffold |
+| `review` | Sitting down to review    | The verdict, in paste-ready blocks                       |
+| `retro`  | Periodically, across many | Proposed amendments to REVIEW_STANDARDS.md               |
 
 Default to `prep` when the phase is not stated and no artifacts exist yet; default to `review` when they do.
 
@@ -30,6 +30,11 @@ The scan runs and is written to disk, but surfacing it before the human's own pa
 Every review point, its severity, and the overall verdict come from the reviewer.
 You format what they said into paste-ready blocks and nothing more.
 A verdict you wrote is a review you performed, which is the one thing this process exists to prevent.
+
+**`notes.md` is the reviewer's scratchpad, not yours.**
+You may append what they say aloud, verbatim, under the file it concerns.
+You never add your own observations, scan findings, or tidy up their wording there.
+A note is raw material, not a review point - it becomes one only when they confirm it and give it a severity at transcription.
 
 **Tables are column-aligned.**
 These artifacts are read in a plain text editor far more often than they are rendered, and a ragged table is hard work there.
@@ -82,6 +87,7 @@ Read those paths from the JSON rather than constructing them - the convenience s
 
 If the output contains `since_last_pass`, the branch moved since the previous pass.
 Say so, and offer an incremental review of just that range.
+If `notes.md` already exists, run `python3 scripts/scaffold_notes.py --id <id> --update --range <since_last_pass>` instead of re-scaffolding it: it adds headings for newly touched files and puts a re-read checkbox under any already-noted file that changed again, without touching what the reviewer wrote.
 
 ### 2. Classify
 
@@ -132,9 +138,20 @@ Never improvise an artifact without its prompt - an inconsistent artifact is wor
 Run `prompts/scanner.md`.
 Write the result to `<artifacts>/scan.md`.
 
-### 6. Report back
+### 6. Scaffold the reviewer's notes
+
+```
+python3 scripts/scaffold_notes.py --id <id>
+```
+
+Writes `<artifacts>/notes.md`: a heading per changed file (all files, not only code) in diff order with its `+/-` counts and a `- [ ] read` checkbox, plus empty `First impressions`, `Cross-cutting`, `Questions` and `Not reviewed` sections.
+It contains structure only, so it is safe to create after the scan - nothing from `scan.md` goes in it.
+It refuses to overwrite a non-empty file; use `--update` to add files, `--force` only if the reviewer asks to start over.
+
+### 7. Report back
 
 Show the human **the guide only**, plus one line naming the other artifacts and where they are.
+Point them at `notes.md` as the place to jot thoughts while they read - in their editor, alongside the diff.
 Do not summarize, quote, or hint at the scan results.
 
 ## Phase: review
@@ -143,10 +160,10 @@ Work through this in order.
 The order is the point: it keeps the human's first impression their own.
 
 1. **Orient.** Show `guide.md`, and any flow/call-graph/residue artifact. Nothing else.
-2. **Their pass.** Let them read the change and talk. Capture their observations verbatim as they go. Answer clarifying questions about the code; do not volunteer opinions on quality.
+2. **Their pass.** Let them read the change and talk, writing in `notes.md` as they go. Capture anything they say aloud verbatim into `notes.md` under the relevant file heading (or `Cross-cutting`), so the file stays the single record of their pass. Re-read `notes.md` before each reply - they may have edited it in their editor since. Answer clarifying questions about the code; do not volunteer opinions on quality. Unticked `read` boxes at the end are files they have not been through; mention them, do not judge them.
 3. **Reveal the scan.** Now show `scan.md`. For each finding ask whether it is real, and whether they want it in the verdict. A scan failure is **not** a review point until the reviewer adopts it - otherwise the scan quietly authors blockers. Record rejected findings as false positives; the retro needs them.
 4. **Human-only checklist.** List every `Active: true` rule in `REVIEW_STANDARDS.md` with `Checkable by: human`. These were never scanned. Work through each one; AI silence is not evidence.
-5. **Transcribe the verdict.** Scaffold the file first with `python3 scripts/scaffold_verdict.py --id <id>`, which pre-fills frontmatter, a heading per changed code file, and a disposition row per scanned rule. Then fill it in from what the reviewer said. See the transcription rules.
+5. **Transcribe the verdict.** Scaffold the file first with `python3 scripts/scaffold_verdict.py --id <id>`, which pre-fills frontmatter, a heading per changed code file, and a disposition row per scanned rule. Then fill it in from what the reviewer said and wrote in `notes.md`. Walk the notes with them file by file: for each note, ask whether it becomes a point, and at what severity. Shorthand like `!` or `~` is a hint for that question, never an answer to it. Their `Not reviewed` notes seed the verdict's `Not reviewed` section, verbatim. See the transcription rules.
 6. **Record.** Run `python3 scripts/verdict_to_record.py <artifacts>/verdict.md`. It derives `record.json` from the verdict rather than making the reviewer state anything twice, and refuses to run if a severity or the verdict is missing. Add any field it cannot know - `wall_minutes`, `artifacts_used` - per `references/record-schema.md`.
 7. **Sync.** Run `python3 scripts/prconfig.py sync -m "<id>"`. This commits the artifact root when it is a git repo and is a harmless no-op otherwise, so call it unconditionally.
 
@@ -158,6 +175,7 @@ The line between the two is narrow enough to be worth stating precisely.
 | You may                                                     | You must not                                           |
 | ----------------------------------------------------------- | ------------------------------------------------------ |
 | Format their words into the block structure                 | Rewrite, polish, soften or sharpen their wording       |
+| Offer each note in `notes.md` as a candidate point          | Promote a note to a point without their say-so         |
 | Resolve a `file:line` they described in prose               | Add a point they did not raise                         |
 | Propose a RuleID tag for a point, for them to confirm       | Assign severity - that is theirs                       |
 | Point out that a scan finding was never ruled on            | Carry a scan finding into the verdict unadopted        |

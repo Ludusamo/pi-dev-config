@@ -68,6 +68,7 @@ This is the main feedback path from practice back into the standards.
 
 **`artifacts_used`** vs **`artifacts_generated`** - the gap is pure waste.
 An artifact generated for five reviews and used in none should be dropped from that classification's profile.
+Include `notes` when the reviewer wrote in `notes.md` - it is scaffolded every time, so this is how the retro learns whether it earns its place.
 This is the field that makes reviews get *faster* rather than merely more thorough.
 
 ## Fields to be honest about
