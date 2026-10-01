@@ -25,6 +25,8 @@ NOT_STATED = "<not stated>"
 
 DISPOSITIONS = {
     "adopted", "false positive", "agreed", "checked, ok", "not reached",
+    # the scan said pass but the reviewer found the thing it was checking for
+    "missed",
 }
 
 # - [ ] **:88** `blocker` `R-003`
@@ -55,9 +57,22 @@ def parse_frontmatter(text):
     return meta, text[m.end():]
 
 
+def strip_html_comments(text):
+    """Blank out <!-- ... --> while preserving line numbering.
+
+    The scaffold documents the entry shape with a worked example inside a
+    comment. Without this, that example parses as a real review point and
+    invents a blocker nobody raised.
+    """
+    return re.sub(r"<!--.*?-->",
+                  lambda m: "\n" * m.group(0).count("\n"),
+                  text, flags=re.S)
+
+
 def parse(path):
     text = Path(path).read_text()
     meta, body = parse_frontmatter(text)
+    body = strip_html_comments(body)
 
     points, scan_rows, errors = [], [], []
     section, current_file = None, None
@@ -121,6 +136,7 @@ def parse(path):
             "false_positives": [r["rule"] for r in scan_rows
                                 if r["reviewer"] == "false positive"],
             "not_reached": [r["rule"] for r in scan_rows if r["reviewer"] == "not reached"],
+            "missed": [r["rule"] for r in scan_rows if r["reviewer"] == "missed"],
         },
         "not_reviewed": " ".join(not_reviewed) or None,
         "counts": {

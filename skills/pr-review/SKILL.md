@@ -135,7 +135,7 @@ The order is the point: it keeps the human's first impression their own.
 2. **Their pass.** Let them read the change and talk. Capture their observations verbatim as they go. Answer clarifying questions about the code; do not volunteer opinions on quality.
 3. **Reveal the scan.** Now show `scan.md`. For each finding ask whether it is real, and whether they want it in the verdict. A scan failure is **not** a review point until the reviewer adopts it - otherwise the scan quietly authors blockers. Record rejected findings as false positives; the retro needs them.
 4. **Human-only checklist.** List every `Active: true` rule in `REVIEW_STANDARDS.md` with `Checkable by: human`. These were never scanned. Work through each one; AI silence is not evidence.
-5. **Transcribe the verdict.** Write `<artifacts>/verdict.md` from what the reviewer said, in the shape below. See the transcription rules.
+5. **Transcribe the verdict.** Scaffold the file first with `python3 scripts/scaffold_verdict.py --id <id>`, which pre-fills frontmatter, a heading per changed code file, and a disposition row per scanned rule. Then fill it in from what the reviewer said. See the transcription rules.
 6. **Record.** Run `python3 scripts/verdict_to_record.py <artifacts>/verdict.md`. It derives `record.json` from the verdict rather than making the reviewer state anything twice, and refuses to run if a severity or the verdict is missing. Add any field it cannot know - `wall_minutes`, `artifacts_used` - per `references/record-schema.md`.
 7. **Sync.** Run `python3 scripts/prconfig.py sync -m "<id>"`. This commits the artifact root when it is a git repo and is a harmless no-op otherwise, so call it unconditionally.
 
@@ -179,7 +179,7 @@ The essentials:
 - **Metadata stays outside the fenced blocks.** Severity and rule tags go in the heading; the block holds only what gets pasted. The author does not care that a comment came from R-003.
 - **Line comments group by file**, in diff order, then by line. Pasting is per-file navigation - grouping by severity makes you open the same file three times.
 - **Every point is a checkbox.** Pasting twelve comments is interruptible; the file is a worklist, not a document.
-- **Scan disposition table** records what you decided about each scan finding. This is the only place the scan gets graded, and the retro's main input.
+- **Scan disposition table** records what you decided about each scan finding - `adopted`, `false positive`, `agreed`, `checked, ok`, `not reached`, `missed`. This is the only place the scan gets graded, and the retro's main input.
 
 Tag every point with the RuleID it came from, or `new` if no rule covers it.
 You may propose the tag by matching the point against the rules; the reviewer confirms it.

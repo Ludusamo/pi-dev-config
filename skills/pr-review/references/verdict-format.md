@@ -169,10 +169,27 @@ Every rule the scan reported on, and what the reviewer decided.
 | `agreed`         | Correct, but not worth raising with the author          |
 | `checked, ok`    | A `human` rule the reviewer verified and found fine     |
 | `not reached`    | A `human` rule the reviewer did not get to              |
+| `missed`         | Scan said pass, but the thing it checks for is there    |
 
 This table is the single highest-value part of the file for the retro.
 `false positive` twice for the same rule retires it; `not reached` repeatedly means the rule is impractical as written.
 It is also the only place where the agent's scan is graded, which is why the reviewer fills it and the agent does not.
+
+## Scaffolding
+
+Do not write this file from scratch.
+
+```
+python3 scripts/scaffold_verdict.py --id STONE-1494
+```
+
+Fills in everything the agent can know from the artifacts already on disk: frontmatter from `.state.json` and `classify.json`, a `###` heading per changed code file in diff order, and a disposition row per rule the scan reported on.
+Rules the scan marked `n/a` become a trailing comment rather than rows, since they need no decision.
+
+Everything only the reviewer can know is left as `<not stated>` or `<fill>`, both of which the parser rejects.
+The scaffold is a form, never a draft - it contains no points, no severities and no verdict, because those are the reviewer's and an agent-written placeholder is the first step toward an agent-written review.
+
+It refuses to overwrite a verdict file that already has content unless given `--force`.
 
 ## Deriving the record
 
