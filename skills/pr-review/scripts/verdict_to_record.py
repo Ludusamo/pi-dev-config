@@ -280,6 +280,10 @@ def parse(path):
             "not_reached": [r["rule"] for r in scan_rows if r["reviewer"] == "not reached"],
             "missed": [r["rule"] for r in scan_rows if r["reviewer"] == "missed"],
         }
+        if not scan_rows:
+            warnings.append("scan.md exists but Scan disposition has no rows - run "
+                            "scaffold_verdict.py --add-scan, or this reads as a scan "
+                            "that found nothing")
     else:
         if signals.get("standards_found") is False:
             reason = "no REVIEW_STANDARDS.md"

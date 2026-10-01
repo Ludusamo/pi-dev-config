@@ -10,8 +10,16 @@ dispositions - is left as <not stated> or <fill>, which verdict_to_record.py
 rejects. The scaffold is a form, never a draft - no point,
 severity or verdict is ever invented here.
 
+Scaffolded during prep with --no-scan, alongside notes.md, so the reviewer has
+it from the start. The scan disposition rows are left out then - they show
+what the scan said, and the scan stays hidden until the reviewer's own pass is
+done. --add-scan fills them in when the scan is revealed, without touching
+anything else in the file.
+
 Usage:
-    scaffold_verdict.py --id STONE-1494                  # resolve via config
+    scaffold_verdict.py --id STONE-1494 --no-scan        # prep
+    scaffold_verdict.py --id STONE-1494 --add-scan       # review: reveal the scan
+    scaffold_verdict.py --id STONE-1494                  # all at once
     scaffold_verdict.py --artifacts ~/notes/pr-reviews/cod-backend/STONE-1494
     scaffold_verdict.py --id STONE-1494 --force          # overwrite existing
 """
@@ -84,7 +92,83 @@ def changed_code_files(repo_path, rng):
     return [f for f in out if f and CODE.search(f)]
 
 
-def build(artifacts, repo_path_arg=None):
+SCAN_PENDING = ("<!-- Filled in when the scan is revealed: "
+                "scaffold_verdict.py --id <id> --add-scan -->")
+
+
+def scan_section(rows, na):
+    """Lines for the Scan disposition section body."""
+    if not rows:
+        return ["<!-- No scan.md found, so the record will say the scan did not run. "
+                "If REVIEW_STANDARDS.md exists, the scan step was skipped; say so here. -->"]
+    L = [
+        "<!-- Reviewer column: adopted | false positive | agreed | "
+        "checked, ok | not reached | missed -->",
+        "",
+        "| Rule  | Scan said | Reviewer |",
+        "| ----- | --------- | -------- |",
+    ]
+    L += [f"| {r} | {v} | <fill> |" for r, v in rows]
+    if na:
+        L += ["", f"<!-- not applicable, no decision needed: {', '.join(na)} -->"]
+    return L
+
+
+def add_scan(text, artifacts):
+    """Fill the Scan disposition section of an existing verdict.md.
+
+    Touches nothing else the reviewer wrote. Rules already in the table are
+    left alone, so it is safe to rerun after a rescan. Also refreshes
+    `reviewed`, since the scan is revealed during the review session and a
+    verdict scaffolded at prep would otherwise carry the prep date.
+    Returns (text, added_rules).
+    """
+    rows, na = scan_rules(artifacts / "scan.md")
+    lines = text.splitlines()
+    try:
+        start = next(i for i, l in enumerate(lines) if l.strip() == "## Scan disposition")
+    except StopIteration:
+        sys.exit("verdict.md has no '## Scan disposition' section - add the heading, "
+                 "or rescaffold with --force if nothing has been written yet")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+               len(lines))
+    section = lines[start + 1:end]
+    present = {m.group(0) for l in section if l.lstrip().startswith("|")
+               for m in [RULE.search(l)] if m}
+    new_rows = [(r, v) for r, v in rows if r not in present]
+
+    if not present:
+        # No table yet: replace the placeholder body wholesale, but keep
+        # anything the reviewer wrote that is not the placeholder.
+        kept = [l for l in section if l.strip() != SCAN_PENDING
+                and not l.startswith("<!-- No scan.md found")]
+        while kept and not kept[0].strip():
+            kept.pop(0)
+        body = scan_section(rows, na) + ([""] + kept if any(l.strip() for l in kept) else [])
+    else:
+        last_row = max(i for i, l in enumerate(section) if l.lstrip().startswith("|"))
+        body = (section[:last_row + 1]
+                + [f"| {r} | {v} | <fill> |" for r, v in new_rows]
+                + section[last_row + 1:])
+        body = [l for l in body if l.strip() != SCAN_PENDING]
+    while body and not body[0].strip():
+        body.pop(0)
+    while body and not body[-1].strip():
+        body.pop()
+    tail = [""] if end < len(lines) else []
+    lines[start + 1:end] = [""] + body + tail
+
+    today = dt.date.today().isoformat()
+    if lines and lines[0] == "---":
+        close = next((i for i in range(1, len(lines)) if lines[i] == "---"), 0)
+        for i in range(1, close):
+            if lines[i].startswith("reviewed:"):
+                lines[i] = f"reviewed: {today}"
+    text = "\n".join(lines).rstrip("\n") + "\n"
+    return format_tables(text), [r for r, _ in new_rows]
+
+
+def build(artifacts, repo_path_arg=None, scan=True):
     state = read_json(artifacts / ".state.json")
     cls = read_json(artifacts / "classify.json")
 
@@ -170,24 +254,17 @@ def build(artifacts, repo_path_arg=None):
         "",
     ]
 
-    if rows:
-        L += [
-            "<!-- Reviewer column: adopted | false positive | agreed | "
-            "checked, ok | not reached | missed -->",
-            "",
-            "| Rule  | Scan said | Reviewer |",
-            "| ----- | --------- | -------- |",
-        ]
-        L += [f"| {r} | {v} | <fill> |" for r, v in rows]
-        if na:
-            L += ["", f"<!-- not applicable, no decision needed: {', '.join(na)} -->"]
+    if scan:
+        L += scan_section(rows, na)
     else:
-        L += ["<!-- No scan.md found, so the record will say the scan did not run. "
-              "If REVIEW_STANDARDS.md exists, the scan step was skipped; say so here. -->"]
+        # Prep: the reviewer may open this file during their own pass, and the
+        # rows would show what the scan said. Filled in by --add-scan instead.
+        L += [SCAN_PENDING]
 
     L.append("")
     # Align before writing - this file is read in a plain text editor.
-    return format_tables("\n".join(L)), {"files": len(files), "scan_rows": len(rows)}
+    return format_tables("\n".join(L)), {"files": len(files),
+                                          "scan_rows": len(rows) if scan else "deferred"}
 
 
 def main():
@@ -196,8 +273,16 @@ def main():
     ap.add_argument("--id")
     ap.add_argument("--artifacts", help="artifact directory; overrides --id")
     ap.add_argument("--repo-path", default=".")
-    ap.add_argument("--force", action="store_true", help="overwrite a non-empty verdict.md")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--force", action="store_true", help="overwrite a non-empty verdict.md")
+    mode.add_argument("--add-scan", action="store_true",
+                      help="fill the Scan disposition rows of an existing verdict.md")
+    ap.add_argument("--no-scan", action="store_true",
+                    help="leave Scan disposition empty - use during prep, so the "
+                         "scan is not visible before the reviewer's pass")
     args = ap.parse_args()
+    if args.add_scan and args.no_scan:
+        sys.exit("--add-scan and --no-scan contradict each other")
 
     if args.artifacts:
         artifacts = Path(args.artifacts).expanduser()
@@ -212,10 +297,18 @@ def main():
         sys.exit(f"no artifact directory at {artifacts}")
 
     out = artifacts / "verdict.md"
+    if args.add_scan:
+        if not out.exists():
+            sys.exit(f"no {out} - scaffold it first")
+        text, added = add_scan(out.read_text(), artifacts)
+        out.write_text(text)
+        print(json.dumps({"updated": str(out), "scan_rows_added": added}, indent=2))
+        return
+
     if out.exists() and out.read_text().strip() and not args.force:
         sys.exit(f"{out} already has content - pass --force to overwrite")
 
-    text, stats = build(artifacts, args.repo_path)
+    text, stats = build(artifacts, args.repo_path, scan=not args.no_scan)
     out.write_text(text)
     print(json.dumps({"written": str(out), **stats}, indent=2))
 

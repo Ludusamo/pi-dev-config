@@ -230,13 +230,23 @@ It is also the only place where the agent's scan is graded, which is why the rev
 ## Scaffolding
 
 Do not write this file from scratch.
+It is scaffolded in two steps, so the scan stays hidden until the reviewer's own pass is done:
 
 ```
-python3 scripts/scaffold_verdict.py --id STONE-1494
+python3 scripts/scaffold_verdict.py --id STONE-1494 --no-scan    # prep, alongside notes.md
+python3 scripts/scaffold_verdict.py --id STONE-1494 --add-scan   # review, when the scan is revealed
 ```
 
-Fills in everything the agent can know from the artifacts already on disk: frontmatter from `.state.json` and `classify.json`, a `###` heading per changed code file in diff order, and a disposition row per rule the scan reported on.
+The first fills in everything the agent can know from the artifacts already on disk: frontmatter from `.state.json` and `classify.json`, and a `###` heading per changed code file in diff order.
+The scan disposition section holds only a placeholder, because its rows would show what the scan said for each rule.
+
+`--add-scan` adds a disposition row per rule the scan reported on, leaving everything else in the file as the reviewer left it.
+Rules already in the table are skipped, so it is safe to rerun after a rescan.
+It also sets `reviewed` to today, since a file scaffolded at prep would otherwise carry the prep date.
 Rules the scan marked `n/a` become a trailing comment rather than rows, since they need no decision.
+
+Without either flag, the script does both at once - for a review prepped before the verdict was scaffolded automatically.
+`verdict_to_record.py` warns if `scan.md` exists but the disposition table is empty, the sign that `--add-scan` was never run.
 
 Everything only the reviewer can know is left as `<not stated>` or `<fill>`, both of which the parser rejects.
 The scaffold is a form, never a draft - it contains no points, no severities and no verdict, because those are the reviewer's and an agent-written placeholder is the first step toward an agent-written review.

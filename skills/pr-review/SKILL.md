@@ -144,20 +144,26 @@ Never improvise an artifact without its prompt - an inconsistent artifact is wor
 Run `prompts/scanner.md`.
 Write the result to `<artifacts>/scan.md`.
 
-### 6. Scaffold the reviewer's notes
+### 6. Scaffold the reviewer's notes and the verdict
 
 ```
 python3 scripts/scaffold_notes.py --id <id>
+python3 scripts/scaffold_verdict.py --id <id> --no-scan
 ```
 
 Writes `<artifacts>/notes.md`: a heading per changed file (all files, not only code) in diff order with its `+/-` counts and a `- [ ] read` checkbox, plus empty `First impressions`, `Cross-cutting`, `Questions` and `Not reviewed` sections.
 It contains structure only, so it is safe to create after the scan - nothing from `scan.md` goes in it.
 It refuses to overwrite a non-empty file; use `--update` to add files, `--force` only if the reviewer asks to start over.
 
+`verdict.md` is scaffolded now too, so the reviewer has the form from the start and can draft comments into it as they go.
+It holds frontmatter, a heading per changed code file, and empty sections - no points, severities or verdict.
+`--no-scan` is mandatory here: the scan disposition rows show what the scan said for each rule, so they stay out until the scan is revealed.
+If `verdict.md` already exists (a later pass), leave it alone.
+
 ### 7. Report back
 
 Show the human **the guide only**, plus one line naming the other artifacts and where they are.
-Point them at `notes.md` as the place to jot thoughts while they read - in their editor, alongside the diff.
+Point them at `notes.md` as the place to jot thoughts while they read - in their editor, alongside the diff - and mention that `verdict.md` is scaffolded and ready for when they conclude.
 Do not summarize, quote, or hint at the scan results.
 
 ## Phase: review
@@ -167,9 +173,9 @@ The order is the point: it keeps the human's first impression their own.
 
 1. **Orient.** Show `guide.md`, and any flow/call-graph/residue artifact. Nothing else.
 2. **Their pass.** Let them read the change and talk, writing in `notes.md` as they go. Capture anything they say aloud verbatim into `notes.md` under the relevant file heading (or `Cross-cutting`), so the file stays the single record of their pass. Re-read `notes.md` before each reply - they may have edited it in their editor since. Answer clarifying questions about the code; do not volunteer opinions on quality. Unticked `read` boxes at the end are files they have not been through; mention them, do not judge them.
-3. **Reveal the scan.** Now show `scan.md`. For each finding ask whether it is real, and whether they want it in the verdict. A scan failure is **not** a review point until the reviewer adopts it - otherwise the scan quietly authors blockers. Record rejected findings as false positives; the retro needs them.
+3. **Reveal the scan.** Run `python3 scripts/scaffold_verdict.py --id <id> --add-scan` to fill the scan disposition rows into `verdict.md` - it touches nothing else in the file and is safe to rerun. Then show `scan.md`. For each finding ask whether it is real, and whether they want it in the verdict. A scan failure is **not** a review point until the reviewer adopts it - otherwise the scan quietly authors blockers. Record rejected findings as false positives; the retro needs them.
 4. **Human-only checklist.** List every `Active: true` rule in `REVIEW_STANDARDS.md` with `Checkable by: human`. These were never scanned. Work through each one; AI silence is not evidence.
-5. **Transcribe the verdict.** Scaffold the file first with `python3 scripts/scaffold_verdict.py --id <id>`, which pre-fills frontmatter, a heading per changed code file, and a disposition row per scanned rule. Then fill it in from what the reviewer said and wrote in `notes.md`. Walk the notes with them file by file: for each note, ask whether it becomes a point, and at what severity. Shorthand like `!` or `~` is a hint for that question, never an answer to it. Their `Not reviewed` notes seed the verdict's `Not reviewed` section, verbatim. See the transcription rules.
+5. **Transcribe the verdict.** `verdict.md` was scaffolded during prep, and step 3 added the disposition rows. If it is missing (a review prepped before this was automatic), scaffold it now with `python3 scripts/scaffold_verdict.py --id <id>`. Re-read it first - the reviewer may have drafted into it already. Then fill it in from what the reviewer said and wrote in `notes.md`. Walk the notes with them file by file: for each note, ask whether it becomes a point, and at what severity. Shorthand like `!` or `~` is a hint for that question, never an answer to it. Their `Not reviewed` notes seed the verdict's `Not reviewed` section, verbatim. See the transcription rules.
 6. **Second opinion - only if the reviewer asks.** See [Second-opinion pass](#second-opinion-pass). Never offer it as a default step and never run it unasked.
 7. **Finish.** Once the reviewer says the verdict is posted, work through the [finish checklist](#finish-checklist) without waiting to be asked for each step.
 
