@@ -16,6 +16,13 @@ Three phases, run separately:
 
 Default to `prep` when the phase is not stated and no artifacts exist yet; default to `review` when they do.
 
+Where files live (both roots are configurable - see `references/configuration.md`):
+
+| What      | Default root         | Lifetime                                        |
+| --------- | -------------------- | ----------------------------------------------- |
+| Worktrees | `~/reviews`          | Deleted at the end of the review                |
+| Artifacts | `~/notes/pr-reviews` | Kept - notes, verdict and record, for the retro |
+
 ## Hard rules
 
 **Never write, edit, or fix application code.**
@@ -62,8 +69,7 @@ Paths below are relative to this skill directory.
 
 Run from inside the repository being reviewed.
 
-Reviews are stored in two configurable roots: worktrees under `~/reviews`, artifacts and records under `~/notes/pr-reviews`.
-Both can be overridden globally or per repository - see `references/configuration.md`.
+The two storage roots in the table above can be overridden globally or per repository - see `references/configuration.md`.
 Run `python3 scripts/prconfig.py show` to print the resolved paths and where each came from; do that first if artifacts turn up somewhere unexpected.
 
 Never hardcode either root.
@@ -164,8 +170,44 @@ The order is the point: it keeps the human's first impression their own.
 3. **Reveal the scan.** Now show `scan.md`. For each finding ask whether it is real, and whether they want it in the verdict. A scan failure is **not** a review point until the reviewer adopts it - otherwise the scan quietly authors blockers. Record rejected findings as false positives; the retro needs them.
 4. **Human-only checklist.** List every `Active: true` rule in `REVIEW_STANDARDS.md` with `Checkable by: human`. These were never scanned. Work through each one; AI silence is not evidence.
 5. **Transcribe the verdict.** Scaffold the file first with `python3 scripts/scaffold_verdict.py --id <id>`, which pre-fills frontmatter, a heading per changed code file, and a disposition row per scanned rule. Then fill it in from what the reviewer said and wrote in `notes.md`. Walk the notes with them file by file: for each note, ask whether it becomes a point, and at what severity. Shorthand like `!` or `~` is a hint for that question, never an answer to it. Their `Not reviewed` notes seed the verdict's `Not reviewed` section, verbatim. See the transcription rules.
-6. **Record.** Run `python3 scripts/verdict_to_record.py <artifacts>/verdict.md`. It derives `record.json` from the verdict rather than making the reviewer state anything twice, and refuses to run if a severity or the verdict is missing. Add any field it cannot know - `wall_minutes`, `artifacts_used` - per `references/record-schema.md`.
-7. **Sync.** Run `python3 scripts/prconfig.py sync -m "<id>"`. This commits the artifact root when it is a git repo and is a harmless no-op otherwise, so call it unconditionally.
+6. **Second opinion - only if the reviewer asks.** See [Second-opinion pass](#second-opinion-pass). Never offer it as a default step and never run it unasked.
+7. **Finish.** Once the reviewer says the verdict is posted, work through the [finish checklist](#finish-checklist) without waiting to be asked for each step.
+
+### Second-opinion pass
+
+Optional, and only on the reviewer's request, after the verdict is transcribed.
+It comes last so it cannot shape their first impression or their verdict.
+
+Read `notes.md` and `verdict.md`, then raise any points you disagree with or think deserve another look.
+
+- **Confirm before raising.** Check every concern against the code first: trace the logic, read the tests. A concern you could not confirm is either mentioned as checked-and-dropped or not mentioned at all. An unverified hunch costs the reviewer the time you skipped.
+- **Look hardest where they did not.** Spend most of the pass on the areas listed under `Not reviewed`.
+- **The verdict does not change.** You raise; the reviewer decides what, if anything, gets added, and at what severity. The transcription rules still apply.
+- **Draft paste-ready.** Any comment you propose is drafted ready to drop into `verdict.md`: the `### <file>` heading if that file has none yet, then the entry line and the comment in an indented `text` block. Severity and rule are your suggestion, for the reviewer to confirm or change:
+
+  ````markdown
+  ### src/main/java/.../UpstreamCallExecutor.java
+
+  - [ ] **:120** `follow-up` `new`
+
+    ```text
+    The backoff is never reset after a successful call, so ...
+    ```
+  ````
+
+Record every point raised in a `## Agent points` table in `verdict.md` - `Point | Where | Disposition` - with the reviewer's call on each: `adopted`, `rejected - intended`, or `rejected - wrong`.
+See `references/verdict-format.md`.
+The retro uses it to judge whether this pass earns its place.
+
+### Finish checklist
+
+Run in order, after the verdict is posted.
+Stop at the first step that fails and say why.
+
+1. **Ask for the reviewer-only fields.** `artifacts_used` in the frontmatter - which artifacts they actually used, e.g. `[flow, guide, notes]`. Ask; never guess it from what exists or what you showed them. Also ask whether they have anything for the optional, private `## Reviewer notes` section: feedback on the process and the artifacts, for the retro.
+2. **Record.** `python3 scripts/verdict_to_record.py <artifacts>/verdict.md`. It validates first, exactly as `--check` does, and writes nothing if any check fails - fix those with the reviewer, then rerun. It fills the mechanical fields itself (`files`, `hunks`, `mechanical_ratio`, `passes`, `artifacts_generated`, `scan.ran`). Relay any warnings - unparsed lines under `Line comments`, notes with no verdict entry - and ask whether they are intended.
+3. **Sync.** `python3 scripts/prconfig.py sync -m "<id>"`. Commits the artifact root when it is a git repo and is a harmless no-op otherwise, so call it unconditionally. If it warns that the root is not a git repo, pass the warning on.
+4. **Clean up.** Only once step 2 wrote `record.json`: `python3 scripts/review_worktree.py clean --id <id>`. Works from any directory. Run it without asking, and pass on its one-line summary of what was removed and what was kept.
 
 ### Transcription rules
 
@@ -204,7 +246,8 @@ Follow it exactly - `verdict_to_record.py` parses this file, so freelancing the 
 
 The essentials:
 
-- **Frontmatter** carries `id`, `repo`, `head_sha`, `classification`, `verdict`, `reviewed`, `wall_minutes`. You fill all but `verdict` and `wall_minutes` from `classify.json` and the worktree JSON.
+- **Frontmatter** carries `id`, `repo`, `head_sha`, `classification`, `verdict`, `reviewed`, `wall_minutes`, `artifacts_used`. You fill all but `verdict`, `wall_minutes` and `artifacts_used` from `classify.json` and the worktree JSON; those three are the reviewer's.
+- **`## Reviewer notes`** is optional private feedback on the process, never posted. Do not confuse it with `## General comments`, which the author sees.
 - **Metadata stays outside the fenced blocks.** Severity and rule tags go in the heading; the block holds only what gets pasted. The author does not care that a comment came from R-003.
 - **Line comments group by file**, in diff order, then by line. Pasting is per-file navigation - grouping by severity makes you open the same file three times.
 - **Every point is a checkbox.** Pasting twelve comments is interruptible; the file is a worklist, not a document.
@@ -222,6 +265,12 @@ The parser rejects those rather than defaulting them, which is the intended beha
 
 Not yet implemented.
 It will read accumulated `record.json` files and propose amendments to `REVIEW_STANDARDS.md`: new rules from recurring `new` points, `Active: false` for rules that keep producing false positives, and artifact types nobody reads.
+
+It should also:
+
+- Read `reviewer_notes` when proposing changes to the process or the artifacts.
+- Flag it when `agent_points` are mostly rejected, as a sign the second-opinion pass is noisy.
+- Skip records with `scan.ran: false` when computing scan statistics.
 
 ## References
 

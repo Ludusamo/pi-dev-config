@@ -5,9 +5,16 @@ The reviewer states each point once, in verdict.md. This extracts the
 structured half rather than asking them to retype severities and rule tags
 into a second file.
 
-Refuses to invent. Unstated severities and an unstated verdict are errors,
-not defaults: the retro's only inputs are these records, and a fabricated
-severity corrupts the one measurement that matters.
+Refuses to invent. Unstated severities, an unstated verdict and an unstated
+artifacts_used are errors, not defaults: the retro's only inputs are these
+records, and a fabricated value corrupts the one measurement that matters.
+
+The mechanical fields - files, hunks, mechanical_ratio, passes,
+artifacts_generated, and whether the scan ran - come from the other files in
+the artifact directory, so the reviewer never types them.
+
+Writing always runs the --check validation first and writes nothing if it
+fails.
 
 Usage:
     verdict_to_record.py <artifacts>/verdict.md [--out record.json] [--check]
@@ -20,6 +27,11 @@ import sys
 from pathlib import Path
 
 SEVERITIES = {"blocker", "nitpick", "follow-up"}
+AGENT_DISPOSITIONS = {"adopted", "rejected - intended", "rejected - wrong"}
+# Files whose presence in the artifact directory means the artifact was made.
+GENERATED = ("guide", "flow", "callgraph", "residue", "rollback", "scan")
+# What artifacts_used may name: the generated ones plus the reviewer's notes.
+KNOWN_ARTIFACTS = set(GENERATED) | {"notes"}
 VERDICTS = {"approve", "request changes", "comment"}
 NOT_STATED = "<not stated>"
 
@@ -37,6 +49,9 @@ POINT = re.compile(
     r"`(?P<rule>[^`]+)`\s*$"
 )
 FILE_HEADING = re.compile(r"^###\s+(?P<path>\S+)\s*$")
+FENCE = re.compile(r"^\s*(```|~~~)")
+# notes.md lines that are scaffold structure, or say "looked, fine", not notes.
+NOTES_NON_NOTE = re.compile(r"^\s*(-\s*\[[ xX]\]\s*(read|re-read)\b|ok\b)", re.I)
 TITLE = re.compile(r"^#\s+Verdict:\s*\S+\s*-\s*(?P<verdict>.+?)\s*$")
 
 # Which dispositions make sense for what the scan said. A failure marked
@@ -92,26 +107,66 @@ def strip_html_comments(text):
                   text, flags=re.S)
 
 
+def read_json(path):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def table_cells(raw):
+    """Cells of a data row, or None for a header, separator or non-table line."""
+    m = TABLE_ROW.match(raw)
+    if not m:
+        return None
+    cells = [c.strip() for c in m.group("cells").split("|")]
+    if not cells[0] or set(cells[0]) <= {"-", ":"}:
+        return None
+    return cells
+
+
 def parse(path):
     text = Path(path).read_text()
     meta, body = parse_frontmatter(text)
     body = strip_html_comments(body)
 
-    points, scan_rows, errors = [], [], []
+    points, scan_rows, agent_rows, errors = [], [], [], []
     section, current_file = None, None
-    not_reviewed = []
+    not_reviewed, reviewer_notes, unparsed = [], [], []
+    has_agent_section = False
+    # Line comments bookkeeping: inside a fenced block, and whether the last
+    # significant line was a point (so the next fence is its comment block).
+    in_fence, after_point = False, False
 
     lines = body.splitlines()
     for i, raw in enumerate(lines):
         if (m := SECTION.match(raw)):
             section = m.group("name").strip().lower()
             current_file = None
-            continue
-        if section == "line comments" and (m := FILE_HEADING.match(raw)):
-            current_file = m.group("path")
+            in_fence, after_point = False, False
+            if section == "agent points":
+                has_agent_section = True
             continue
 
+        if section == "line comments":
+            if FENCE.match(raw):
+                if not in_fence and not after_point:
+                    unparsed.append(i)
+                in_fence = not in_fence
+                if not in_fence:
+                    after_point = False
+                continue
+            if in_fence:
+                continue
+            if (m := FILE_HEADING.match(raw)):
+                current_file = m.group("path")
+                after_point = False
+                continue
+            if raw.strip() and not POINT.match(raw):
+                unparsed.append(i)
+
         if section in ("line comments", "general comments") and (m := POINT.match(raw)):
+            after_point = True
             sev = m.group("severity").strip()
             rule = m.group("rule").strip()
             if sev == NOT_STATED or sev not in SEVERITIES:
@@ -132,9 +187,20 @@ def parse(path):
         if section == "not reviewed" and raw.strip() and not raw.startswith("#"):
             not_reviewed.append(raw.strip())
 
-        if section == "scan disposition" and (m := TABLE_ROW.match(raw)):
-            cells = [c.strip() for c in m.group("cells").split("|")]
-            if len(cells) < 3 or cells[0].lower() in ("rule", "") or set(cells[0]) <= {"-", ":"}:
+        if section == "reviewer notes":
+            reviewer_notes.append(raw.rstrip())
+
+        if section == "agent points" and (cells := table_cells(raw)):
+            if len(cells) < 3 or cells[0].lower() == "point":
+                continue
+            point, where, decided = cells[0], cells[1], cells[2].lower()
+            if decided not in AGENT_DISPOSITIONS:
+                errors.append(f"line {i+1}: agent point disposition {decided!r} not one of "
+                              f"{sorted(AGENT_DISPOSITIONS)}")
+            agent_rows.append({"point": point, "where": where, "disposition": decided})
+
+        if section == "scan disposition" and (cells := table_cells(raw)):
+            if len(cells) < 3 or cells[0].lower() == "rule":
                 continue
             rule, said, decided = cells[0], cells[1].lower(), cells[2].lower()
             if decided not in DISPOSITIONS:
@@ -161,6 +227,20 @@ def parse(path):
     elif title_verdict in VERDICTS and title_verdict != verdict:
         errors.append(f"title says {title_verdict!r} but frontmatter says {verdict!r}")
 
+    # artifacts_used is the reviewer's to state - never derived, never defaulted.
+    used = meta.get("artifacts_used", NOT_STATED)
+    warnings = []
+    if not isinstance(used, list):
+        errors.append(f"frontmatter artifacts_used is {used!r} - ask the reviewer which "
+                      f"artifacts they used, e.g. [flow, guide, notes]; [] if none")
+        used = None
+    elif (unknown := [a for a in used if a not in KNOWN_ARTIFACTS]):
+        warnings.append(f"artifacts_used names {unknown}, not one of {sorted(KNOWN_ARTIFACTS)}")
+
+    artifacts = Path(path).resolve().parent
+    cls = read_json(artifacts / "classify.json")
+    state = read_json(artifacts / ".state.json")
+
     record = {
         "id": meta.get("id"),
         "repo": meta.get("repo"),
@@ -168,27 +248,70 @@ def parse(path):
         "head_sha": meta.get("head_sha"),
         "classification": meta.get("classification", []),
         "verdict": verdict,
-        "points": points,
-        "scan": {
+    }
+
+    # Mechanical fields. Omitted, with a warning, rather than guessed.
+    signals = (cls or {}).get("signals") or {}
+    if cls is None:
+        warnings.append("no readable classify.json - files, hunks and mechanical_ratio omitted")
+    for key in ("files", "hunks", "mechanical_ratio"):
+        if key in signals:
+            record[key] = signals[key]
+    if meta.get("wall_minutes"):
+        try:
+            record["wall_minutes"] = int(meta["wall_minutes"])
+        except ValueError:
+            errors.append(f"wall_minutes {meta['wall_minutes']!r} is not a number")
+    if state and isinstance(state.get("passes"), list):
+        record["passes"] = len(state["passes"])
+    else:
+        warnings.append("no readable .state.json - passes omitted")
+
+    record["points"] = points
+
+    # A scan that never ran must not look like one that ran and found nothing.
+    if (artifacts / "scan.md").exists():
+        record["scan"] = {
+            "ran": True,
             "fired": [r["rule"] for r in scan_rows if r["scan"] == "fail"],
             "adopted": [r["rule"] for r in scan_rows if r["reviewer"] == "adopted"],
             "false_positives": [r["rule"] for r in scan_rows
                                 if r["reviewer"] == "false positive"],
             "not_reached": [r["rule"] for r in scan_rows if r["reviewer"] == "not reached"],
             "missed": [r["rule"] for r in scan_rows if r["reviewer"] == "missed"],
-        },
-        "not_reviewed": " ".join(not_reviewed) or None,
-        "counts": {
-            s: sum(1 for p in points if p["severity"] == s) for s in sorted(SEVERITIES)
-        },
-    }
-    if meta.get("wall_minutes"):
-        try:
-            record["wall_minutes"] = int(meta["wall_minutes"])
-        except ValueError:
-            errors.append(f"wall_minutes {meta['wall_minutes']!r} is not a number")
+        }
+    else:
+        if signals.get("standards_found") is False:
+            reason = "no REVIEW_STANDARDS.md"
+        else:
+            reason = "no scan.md - scan step skipped"
+        record["scan"] = {"ran": False, "reason": reason}
+        if scan_rows:
+            warnings.append("scan disposition has rows but there is no scan.md - recorded as not run")
 
-    warnings = []
+    record["not_reviewed"] = " ".join(not_reviewed) or None
+    record["counts"] = {
+        s: sum(1 for p in points if p["severity"] == s) for s in sorted(SEVERITIES)
+    }
+    record["artifacts_generated"] = [a for a in GENERATED if (artifacts / f"{a}.md").exists()]
+    if used is not None:
+        record["artifacts_used"] = used
+    # Absent section: the second-opinion pass did not run. Empty table: it ran
+    # and raised nothing. The two must stay distinguishable.
+    if has_agent_section:
+        record["agent_points"] = agent_rows
+    record["reviewer_notes"] = "\n".join(reviewer_notes).strip() or None
+
+    if unparsed:
+        shown = ", ".join(str(n + 1 + body_offset(text)) for n in unparsed[:5])
+        more = f" (+{len(unparsed) - 5} more)" if len(unparsed) > 5 else ""
+        warnings.append(f"{len(unparsed)} unparsed line(s) under 'Line comments' at line(s) "
+                        f"{shown}{more} - not a heading, point or comment block, so not "
+                        f"in the record (leftover file list?)")
+
+    if (orphans := orphan_notes(artifacts / "notes.md", points)):
+        warnings.append(f"notes on {', '.join(orphans)} have no verdict entry - intended?")
+
     if not record["not_reviewed"]:
         warnings.append("'Not reviewed' is empty - classification chose the depth, so "
                         "what you skipped is the part worth recording")
@@ -200,6 +323,41 @@ def parse(path):
 
     unposted = [p for p in points if not p["posted"]]
     return record, errors, unposted, warnings
+
+
+def body_offset(text):
+    """Lines taken by the frontmatter, to report file line numbers."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    return m.group(0).count("\n") if m else 0
+
+
+def heading_matches(heading, path):
+    """A verdict heading may abbreviate a path with '...'; match it as a wildcard."""
+    if "..." not in heading:
+        return heading == path
+    pattern = ".*".join(re.escape(part) for part in heading.split("..."))
+    return re.fullmatch(pattern, path) is not None
+
+
+def orphan_notes(notes_path, points):
+    """File headings in notes.md with a note under them but no verdict entry."""
+    if not notes_path.exists():
+        return []
+    text = strip_html_comments(notes_path.read_text())
+    noted, current = [], None
+    for raw in text.splitlines():
+        if raw.startswith("## "):
+            current = None
+            continue
+        if (m := FILE_HEADING.match(raw)):
+            current = m.group("path")
+            continue
+        if current and raw.strip() and not NOTES_NON_NOTE.match(raw):
+            if current not in noted:
+                noted.append(current)
+    entries = {p["path"].rsplit(":", 1)[0] if re.search(r":\d+$", p["path"] or "")
+               else p["path"] for p in points if p["path"]}
+    return [f for f in noted if not any(heading_matches(e, f) for e in entries)]
 
 
 def extract_block(lines, start):
@@ -234,11 +392,15 @@ def main():
     for w in warnings:
         print(f"warning: {w}", file=sys.stderr)
 
+    # The same validation gates --check and a real write: nothing is written
+    # from a verdict that would fail --check.
     if errors:
         print("verdict.md is not complete:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         print("\nFill these in with the reviewer rather than guessing.", file=sys.stderr)
+        if not args.check:
+            print("record.json was not written.", file=sys.stderr)
         sys.exit(1)
 
     if unposted:

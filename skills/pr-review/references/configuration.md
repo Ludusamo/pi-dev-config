@@ -75,6 +75,10 @@ prconfig.py sync --push         commit and push
 
 `sync` is a no-op with a clear reason when the artifact root is not a repo, or when there is nothing to commit, so it is safe to call unconditionally at the end of a review.
 
+When the artifact root is not a repo, `sync` also prints a one-line warning suggesting `git init` and `"autocommit": true`.
+It repeats on every sync until `autocommit` is set explicitly in the config file, to either `true` or `false`.
+Setting `"autocommit": false` is how you say "unversioned on purpose" and silence it.
+
 Add a remote yourself.
 Nothing in the pipeline creates or infers one.
 

@@ -35,24 +35,41 @@ The artifact root is `PR_REVIEW_ARTIFACT_ROOT`, defaulting to `~/notes/pr-review
   ],
 
   "scan": {
+    "ran": true,
     "fired": ["R-003"],
+    "adopted": ["R-003"],
     "false_positives": ["R-016"],
-    "undetermined": ["R-004"],
+    "not_reached": ["R-010"],
     "missed": ["R-015"]
   },
 
   "artifacts_generated": ["guide", "flow", "callgraph"],
-  "artifacts_used": ["guide", "flow"],
+  "artifacts_used": ["guide", "flow", "notes"],
+
+  "agent_points": [
+    {"point": "retry loop never resets backoff", "where": "Executor.java:120",
+     "disposition": "adopted"}
+  ],
 
   "not_reviewed": "43 generated doc rows, spot-checked 3",
+  "reviewer_notes": "flow.md did the work; callgraph unused on a change this flat.",
   "escaped_defects": []
 }
 ```
 
+When there is no `scan.md`, `scan` records that instead of a set of empty lists, which would look the same as a scan that ran and found nothing:
+
+```json
+"scan": {"ran": false, "reason": "no REVIEW_STANDARDS.md"}
+```
+
+`agent_points` is present only when the optional second-opinion pass ran.
+Absent means it did not run; `[]` means it ran and raised nothing.
+
 ## Fields that drive the retro
 
 Most of this is context.
-Four fields are what the retro actually computes on, and they are the ones most easily left blank:
+These fields are what the retro actually computes on, and they are the ones most easily left blank:
 
 **`scan.false_positives`** - rules that fired and were wrong.
 Two of these for the same rule is the trigger to set `Active: false`.
@@ -70,6 +87,13 @@ This is the main feedback path from practice back into the standards.
 An artifact generated for five reviews and used in none should be dropped from that classification's profile.
 Include `notes` when the reviewer wrote in `notes.md` - it is scaffolded every time, so this is how the retro learns whether it earns its place.
 This is the field that makes reviews get *faster* rather than merely more thorough.
+`artifacts_used` is a required frontmatter key in `verdict.md`; `verdict_to_record.py` refuses to write a record until it holds a list.
+
+**`agent_points[].disposition`** - what the reviewer did with each point the second-opinion pass raised: `adopted`, `rejected - intended` (the author meant it), or `rejected - wrong` (the agent misread the code).
+Mostly-rejected agent points, especially `rejected - wrong`, mean the second-opinion pass is noisy and should be tightened or used less.
+
+**`reviewer_notes`** - the reviewer's private feedback on the process and the artifacts, never posted.
+The retro reads it when proposing changes, alongside the numbers.
 
 ## Fields to be honest about
 
@@ -90,9 +114,12 @@ The record is written by the agent but is not the agent's opinion.
 | Source               | Fields                                                       |
 | -------------------- | ------------------------------------------------------------ |
 | `classify.json`      | `classification`, `files`, `hunks`, `mechanical_ratio`       |
-| `review_worktree.py` | `id`, `repo`, `head_sha`, `passes`                           |
-| Mechanical           | `date`, `artifacts_generated`                                |
-| **The reviewer**     | `verdict`, every `points[].severity`, every `points[].text`, `scan.false_positives`, `scan.missed`, `artifacts_used`, `not_reviewed`, `wall_minutes` |
+| `review_worktree.py` | `id`, `repo`, `head_sha`, `passes` (count of `.state.json` passes) |
+| Mechanical           | `date`, `artifacts_generated` (which artifact files exist), `scan.ran` |
+| **The reviewer**     | `verdict`, every `points[].severity`, every `points[].text`, `scan.false_positives`, `scan.missed`, `artifacts_used`, `agent_points[].disposition`, `not_reviewed`, `reviewer_notes`, `wall_minutes` |
+
+`verdict_to_record.py` fills every non-reviewer field itself, from the files in the artifact directory.
+It omits a field, with a warning, when the source file is missing.
 
 Nothing in the reviewer row may be inferred.
 A severity the agent chose, or a `false_positives` list it decided on its own, corrupts the retro at the exact point the retro is supposed to be measuring the agent.

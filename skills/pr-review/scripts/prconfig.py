@@ -108,10 +108,13 @@ def resolve(repo_name=None, overrides=None):
         else:
             out[key] = {"path": Path(default), "source": "default"}
 
-    out["autocommit"] = {
-        "value": bool(repo_cfg.get("autocommit", cfg.get("autocommit", False))),
-        "source": "config",
-    }
+    if "autocommit" in repo_cfg:
+        ac = {"value": bool(repo_cfg["autocommit"]), "source": f"config repos.{repo_name}"}
+    elif "autocommit" in cfg:
+        ac = {"value": bool(cfg["autocommit"]), "source": "config global"}
+    else:
+        ac = {"value": False, "source": "default"}
+    out["autocommit"] = ac
     out["_config_file"] = str(cfg_file) if cfg_file else None
     return out
 
@@ -225,7 +228,14 @@ def cmd_sync(args):
     name = repo_name_from(args.repo_path)
     _, art = roots(name, {"artifact_root": args.artifact_root})
     msg = args.message or "review artifacts"
-    print(json.dumps(commit_artifacts(art, msg, push=args.push), indent=2))
+    result = commit_artifacts(art, msg, push=args.push)
+    # Nag until the choice is made explicitly, either way, in the config file.
+    explicit = resolve(name)["autocommit"]["source"] != "default"
+    if not result["committed"] and not is_git_repo(art) and not explicit:
+        print(f"warning: {art} is not a git repo, so review records are not versioned - "
+              f"run `git -C {art} init` and set \"autocommit\": true in {config_path()} "
+              f"(or \"autocommit\": false to silence this)", file=sys.stderr)
+    print(json.dumps(result, indent=2))
 
 
 def main():

@@ -39,6 +39,7 @@ classification: [narrow_behavioural, risky_surface]
 verdict: request changes
 reviewed: 2026-02-11
 wall_minutes: 35
+artifacts_used: [guide, flow, notes]
 ---
 
 # Verdict: STONE-1494 - request changes
@@ -92,6 +93,17 @@ closely and spot-checked the generated doc rows.
 43 generated doc rows under `docs/field-mappings/`, spot-checked 3.
 Upstream's own account resolution - not visible from this repo.
 
+## Reviewer notes
+
+flow.md carried the review; callgraph.md was not needed for a change this flat.
+
+## Agent points
+
+| Point                           | Where                         | Disposition         |
+| ------------------------------- | ----------------------------- | ------------------- |
+| Retry loop never resets backoff | UpstreamCallExecutor.java:120 | adopted             |
+| Export ignores the row limit    | CsvExportService.java:131     | rejected - intended |
+
 ## Scan disposition
 
 | Rule  | Scan said | Reviewer       |
@@ -107,10 +119,15 @@ Upstream's own account resolution - not visible from this repo.
 
 ### Frontmatter
 
-Filled by the agent from `classify.json` and the `review_worktree.py` output, except `verdict` and `wall_minutes`, which only the reviewer can supply.
+Filled by the agent from `classify.json` and the `review_worktree.py` output, except `verdict`, `wall_minutes` and `artifacts_used`, which only the reviewer can supply.
 It exists so `record.json` can be derived rather than re-elicited.
 
 `verdict` is one of `approve`, `request changes`, `comment`, or `<not stated>`.
+
+`artifacts_used` is a list of the artifacts the reviewer actually used, for example `[flow, guide, notes]`, or `[]` for none.
+Valid names are `guide`, `flow`, `callgraph`, `residue`, `rollback`, `scan` and `notes`.
+Ask the reviewer for it - never infer it from which files exist or which ones you showed them.
+The parser rejects `<not stated>`.
 
 ### Summary comment
 
@@ -157,6 +174,26 @@ These get pasted as separate MR-level comments, or folded into the summary; the 
 
 The reviewer's words, verbatim.
 Classification chose the depth, so this is where that choice becomes visible and auditable later if something escapes.
+
+### Reviewer notes
+
+Optional, private, free-text feedback on the process and the artifacts: what helped, what got in the way, what was ignored.
+It is never posted, and is separate from `General comments`, which the MR author sees.
+Copied into the record as `reviewer_notes` for the retro; leaving it empty is fine.
+
+### Agent points
+
+Present only when the reviewer asked for the optional second-opinion pass.
+One row per point the agent raised, with what the reviewer decided:
+
+| Disposition           | Meaning                                 |
+| --------------------- | --------------------------------------- |
+| `adopted`             | The reviewer added it as a review point |
+| `rejected - intended` | Real behaviour, but the author meant it |
+| `rejected - wrong`    | The agent misread the code              |
+
+An adopted point also appears above as a normal entry, with a severity the reviewer gave.
+The section's absence means the pass did not run; an empty table means it ran and raised nothing.
 
 ### Scan disposition
 
@@ -213,4 +250,13 @@ python3 scripts/verdict_to_record.py <artifacts>/verdict.md
 ```
 
 Writes `record.json` beside it.
-Fails loudly on `<not stated>` severities or verdict rather than guessing, since a fabricated severity corrupts the only data the retro has.
+It runs the `--check` validation first and writes nothing if any check fails.
+Fails loudly on `<not stated>` severities, verdict or `artifacts_used` rather than guessing, since a fabricated value corrupts the only data the retro has.
+
+The mechanical fields come from the artifact directory, not from the verdict: `files`, `hunks` and `mechanical_ratio` from `classify.json`, `passes` from `.state.json`, `artifacts_generated` from which artifact files exist, and `scan.ran` from whether `scan.md` exists.
+
+Warnings, which do not block the write:
+
+- **Unparsed lines** - a non-blank line under `## Line comments` that is not a `###` heading, a point, its fenced block, or inside an HTML comment. Usually a scaffolded file list left behind. It is not in the record.
+- **Notes not carried over** - a file in `notes.md` with a note under it but no entry in the verdict. Often deliberate, so it asks rather than fails.
+- An empty `Not reviewed`, a missing summary block, or `request changes` with no points.

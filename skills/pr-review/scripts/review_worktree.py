@@ -24,8 +24,8 @@ Usage:
     review_worktree.py add --base origin/main --head origin/feature/x --id OPST-4216
     review_worktree.py add --head origin/feature/x --sparse
     review_worktree.py list
-    review_worktree.py clean --id OPST-4216
-    review_worktree.py clean --all --older-than 14
+    review_worktree.py clean --id OPST-4216          # from any directory
+    review_worktree.py clean --all --older-than 14   # this repo only
 """
 import argparse
 import json
@@ -190,30 +190,71 @@ def cmd_list(args):
     print(json.dumps({"repo": repo.name, "reviews": rows}, indent=2))
 
 
-def cmd_clean(args):
-    repo = repo_root()
-    wt_root, _ = prconfig.roots(repo.name, {"worktree_root": args.worktree_root})
-    base = wt_root / repo.name
-    if not base.exists():
-        print(json.dumps({"cleaned": []}))
-        return
+def source_repo_of(review_dir):
+    """The repository a review's worktrees belong to, read from the worktrees.
 
-    if args.all:
-        targets = [p for p in base.iterdir() if p.is_dir()]
-    elif args.id:
-        targets = [base / slug(args.id)]
-    else:
+    A linked worktree's .git is a file, "gitdir: <repo>/.git/worktrees/<name>".
+    Two levels up from that gitdir is the source repo's .git directory, and its
+    parent is the repo. This is what lets clean run from any directory.
+    """
+    for wt in sorted(review_dir.glob("*@*")):
+        dotgit = wt / ".git"
+        if not dotgit.is_file():
+            continue
+        for line in dotgit.read_text().splitlines():
+            if line.startswith("gitdir:"):
+                gitdir = Path(line.split(":", 1)[1].strip())
+                if not gitdir.is_absolute():
+                    gitdir = (wt / gitdir).resolve()
+                common = gitdir.parent.parent  # .../.git/worktrees/<name> -> .../.git
+                if common.name == ".git" and common.parent.exists():
+                    return common.parent
+                if common.exists():  # bare repo
+                    return common
+    return None
+
+
+def cmd_clean(args):
+    rid = slug(args.id) if args.id else None
+    if not (args.all or rid):
         sys.exit("pass --id <id> or --all")
 
-    cleaned = []
+    # With --id, find the review under any repo, so the cwd does not matter.
+    # --all stays scoped to the current repo; sweeping every repo is too broad.
+    repo = None
+    if args.all:
+        repo = repo_root()
+        wt_root, _ = prconfig.roots(repo.name, {"worktree_root": args.worktree_root})
+        base = wt_root / repo.name
+        targets = [p for p in base.iterdir() if p.is_dir()] if base.exists() else []
+    else:
+        wt_root, _ = prconfig.roots(None, {"worktree_root": args.worktree_root})
+        targets = sorted(p for p in wt_root.glob(f"*/{rid}") if p.is_dir())
+        # A per-repo worktree_root override puts it elsewhere; try the cwd's repo.
+        here = prconfig.repo_name_from(".")
+        if not targets and here:
+            wt_here, _ = prconfig.roots(here, {"worktree_root": args.worktree_root})
+            if (wt_here / here / rid).is_dir():
+                targets = [wt_here / here / rid]
+        if len(targets) > 1:
+            sys.exit(f"id {rid} exists under more than one repo: "
+                     f"{', '.join(str(t) for t in targets)} - remove one by hand")
+
+    cleaned, repos = [], set()
     cutoff = time.time() - (args.older_than * 86400) if args.older_than else None
     for review in targets:
         if not review.exists():
             continue
         if cutoff is not None and review.stat().st_mtime > cutoff:
             continue
+        src = repo or source_repo_of(review)
+        if src is None:
+            print(f"warning: cannot find the source repo for {review}; "
+                  f"leaving it in place", file=sys.stderr)
+            continue
+        repos.add(src)
         for wt in sorted(review.glob("*@*")):
-            git("worktree", "remove", "--force", str(wt), cwd=repo, check=False)
+            git("worktree", "remove", "--force", str(wt), cwd=src, check=False)
         for link in ("base", "head"):
             p = review / link
             try:
@@ -227,7 +268,18 @@ def cmd_clean(args):
             pass  # leftover files - leave them rather than rm -rf
         cleaned.append(str(review))
 
-    git("worktree", "prune", cwd=repo)
+    for src in repos:
+        git("worktree", "prune", cwd=src, check=False)
+
+    # One line for the human: what went, and what deliberately stayed.
+    if cleaned and rid:
+        repo_name = Path(cleaned[0]).parent.name
+        _, art_root = prconfig.roots(repo_name)
+        print(f"Worktrees removed; record and notes kept at {art_root / repo_name / rid}/",
+              file=sys.stderr)
+    elif cleaned:
+        print(f"Worktrees removed for {len(cleaned)} review(s); records and notes kept "
+              f"under the artifact root", file=sys.stderr)
     print(json.dumps({"cleaned": cleaned}, indent=2))
 
 

@@ -5,8 +5,9 @@ Everything the agent can know is filled in: frontmatter from .state.json and
 classify.json, a file heading per changed code file in diff order, and a scan
 disposition row per rule the scan reported on.
 
-Everything only the reviewer can know is left as <not stated> or <fill>, which
-verdict_to_record.py rejects. The scaffold is a form, never a draft - no point,
+Everything only the reviewer can know - verdict, wall_minutes, artifacts_used,
+dispositions - is left as <not stated> or <fill>, which verdict_to_record.py
+rejects. The scaffold is a form, never a draft - no point,
 severity or verdict is ever invented here.
 
 Usage:
@@ -107,6 +108,7 @@ def build(artifacts, repo_path_arg=None):
         "verdict: <not stated>",
         f"reviewed: {dt.date.today().isoformat()}",
         "wall_minutes: <not stated>",
+        "artifacts_used: <not stated>",
         "---",
         "",
         f"# Verdict: {state.get('id') or artifacts.name} - <not stated>",
@@ -158,6 +160,12 @@ def build(artifacts, repo_path_arg=None):
         "",
         "<!-- What the classification let you skip, in your words. -->",
         "",
+        "## Reviewer notes",
+        "",
+        "<!-- Private, never posted: feedback on the process and the artifacts,",
+        "for the retro. Optional - leave empty if there is nothing to say.",
+        "Not the same as General comments, which the MR author sees. -->",
+        "",
         "## Scan disposition",
         "",
     ]
@@ -174,8 +182,8 @@ def build(artifacts, repo_path_arg=None):
         if na:
             L += ["", f"<!-- not applicable, no decision needed: {', '.join(na)} -->"]
     else:
-        L += ["<!-- No scan.md found. If REVIEW_STANDARDS.md exists, the scan "
-              "step was skipped; say so here. -->"]
+        L += ["<!-- No scan.md found, so the record will say the scan did not run. "
+              "If REVIEW_STANDARDS.md exists, the scan step was skipped; say so here. -->"]
 
     L.append("")
     # Align before writing - this file is read in a plain text editor.
