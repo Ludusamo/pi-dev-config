@@ -39,6 +39,17 @@ SECTION_TO_SCAN = {
 }
 
 
+def resolve_repo_path(stored, given):
+    """classify.json's repo_path if absolute, else --repo-path.
+
+    Older classify.json files recorded the path as given, often ".", which
+    means nothing once you are no longer in that directory.
+    """
+    if stored and Path(stored).is_absolute():
+        return stored
+    return given or "."
+
+
 def read_json(path, default=None):
     try:
         return json.loads(Path(path).read_text())
@@ -72,7 +83,7 @@ def changed_code_files(repo_path, rng):
     return [f for f in out if f and CODE.search(f)]
 
 
-def build(artifacts):
+def build(artifacts, repo_path_arg=None):
     state = read_json(artifacts / ".state.json")
     cls = read_json(artifacts / "classify.json")
 
@@ -80,7 +91,7 @@ def build(artifacts):
     head_sha = (passes[-1].get("head_sha") or "")[:7]
     matched = [k for k, v in (cls.get("classification") or {}).items()
                if v.get("matched") is True]
-    repo_path = cls.get("repo_path")
+    repo_path = resolve_repo_path(cls.get("repo_path"), repo_path_arg)
     rng = cls.get("range")
 
     files = changed_code_files(repo_path, rng) if repo_path and rng else []
@@ -196,7 +207,7 @@ def main():
     if out.exists() and out.read_text().strip() and not args.force:
         sys.exit(f"{out} already has content - pass --force to overwrite")
 
-    text, stats = build(artifacts)
+    text, stats = build(artifacts, args.repo_path)
     out.write_text(text)
     print(json.dumps({"written": str(out), **stats}, indent=2))
 

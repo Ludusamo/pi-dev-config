@@ -394,7 +394,7 @@ def main(args):
 
     print(json.dumps({
         "range": args.range,
-        "repo_path": str(repo),
+        "repo_path": str(Path(repo).resolve()),
         "signals": signals,
         "classification": classification,
         "artifacts": sorted(artifacts),

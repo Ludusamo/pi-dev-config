@@ -37,6 +37,17 @@ FILE_HEADING = re.compile(r"^### (.+?)\s*$")
 FILES_SECTION = "## Files"
 
 
+def resolve_repo_path(stored, given):
+    """classify.json's repo_path if absolute, else --repo-path.
+
+    Older classify.json files recorded the path as given, often ".", which
+    means nothing once you are no longer in that directory.
+    """
+    if stored and Path(stored).is_absolute():
+        return stored
+    return given or "."
+
+
 def read_json(path):
     try:
         return json.loads(Path(path).read_text())
@@ -205,7 +216,7 @@ def main():
 
     state = read_json(artifacts / ".state.json")
     cls = read_json(artifacts / "classify.json")
-    repo_path = cls.get("repo_path") or args.repo_path
+    repo_path = resolve_repo_path(cls.get("repo_path"), args.repo_path)
     rng = args.range or cls.get("range")
     if not rng:
         sys.exit("no range: run classify.py first, or pass --range")
