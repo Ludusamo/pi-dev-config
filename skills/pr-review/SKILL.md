@@ -12,7 +12,7 @@ Three phases, run separately:
 | -------- | ------------------------- | -------------------------------------------------------- |
 | `prep`   | Before reading the diff   | Artifacts on disk: guide, scan, diagrams, notes scaffold |
 | `review` | Sitting down to review    | The verdict, in paste-ready blocks                       |
-| `retro`  | Periodically, across many | Proposed amendments to REVIEW_STANDARDS.md               |
+| `retro`  | Periodically, across many | Proposed changes to REVIEW_STANDARDS.md and the process  |
 
 Default to `prep` when the phase is not stated and no artifacts exist yet; default to `review` when they do.
 
@@ -105,7 +105,13 @@ python3 scripts/classify.py --repo-path <repo_path> --range <range> \
 This is the deterministic half: file and hunk counts, mechanical-substitution clustering, changed test expectations, shared-contract consumers, risky-surface matches.
 Do not recompute any of it by reading the diff yourself.
 
-Read `.classification` for what the change is, `.artifacts` for what to generate, and `.adjudicate` for the questions the script refused to guess at.
+Read `.classification` for what the change is, `.tier` and `.effort` for how deep the review should go, `.artifacts` for what to generate, and `.adjudicate` for the questions the script refused to guess at.
+
+`.tier` is `quick`, `standard` or `large`.
+`quick` means small (at most 15 code files and 80 code hunks), with no deep cut and no risky-surface match.
+For a `quick` change the whole prep is a short guide, plus the scan if the repo has standards, so the reviewer can just go and read the files.
+Do not generate anything else for it, even if a step below would otherwise ask for it.
+If you think the tier is wrong, say so in one line and let the reviewer choose; never upgrade it silently.
 
 If `.signals.standards_found` is false, say so plainly, skip the scan step, and offer to draft a starter `REVIEW_STANDARDS.md` from `references/standards-format.md`.
 
@@ -117,6 +123,8 @@ Write the result to `<artifacts>/guide.md`.
 Do not read `REVIEW_STANDARDS.md` before this step completes.
 
 ### 4. Build the remaining artifacts
+
+Skip this step for the `quick` tier - `.artifacts` holds only `guide`.
 
 For each entry in `.artifacts` from classify.json other than `guide`, run the matching prompt and write its output next to the guide:
 
@@ -147,13 +155,17 @@ Write the result to `<artifacts>/scan.md`.
 ### 6. Scaffold the reviewer's notes and the verdict
 
 ```
-python3 scripts/scaffold_notes.py --id <id>
+python3 scripts/scaffold_notes.py --id <id>          # skip for the quick tier
 python3 scripts/scaffold_verdict.py --id <id> --no-scan
 ```
 
-Writes `<artifacts>/notes.md`: a heading per changed file (all files, not only code) in diff order with its `+/-` counts and a `- [ ] read` checkbox, plus empty `First impressions`, `Cross-cutting`, `Questions` and `Not reviewed` sections.
+`notes.md` is deliberately minimal: a title, one comment line, and empty `Notes`, `Questions` and `Not reviewed` sections.
+No frontmatter, no checkboxes, no per-file list.
+The reviewer writes a file name or `path:line` and a note, in any shape.
+Add `--files` only if the reviewer asks for a heading per changed file.
+For the `quick` tier, do not scaffold it at all unless the reviewer asks for it.
 It contains structure only, so it is safe to create after the scan - nothing from `scan.md` goes in it.
-It refuses to overwrite a non-empty file; use `--update` to add files, `--force` only if the reviewer asks to start over.
+It refuses to overwrite a non-empty file; use `--update --range <since_last_pass>` on a later pass, `--force` only if the reviewer asks to start over.
 
 `verdict.md` is scaffolded now too, so the reviewer has the form from the start and can draft comments into it as they go.
 It holds frontmatter, a heading per changed code file, and empty sections - no points, severities or verdict.
@@ -163,7 +175,8 @@ If `verdict.md` already exists (a later pass), leave it alone.
 ### 7. Report back
 
 Show the human **the guide only**, plus one line naming the other artifacts and where they are.
-Point them at `notes.md` as the place to jot thoughts while they read - in their editor, alongside the diff - and mention that `verdict.md` is scaffolded and ready for when they conclude.
+For the `quick` tier, that is the whole report: the guide, and "read the files".
+Otherwise, point them at `notes.md` as the place to jot thoughts while they read - in their editor, alongside the diff - and mention that `verdict.md` is scaffolded and ready for when they conclude.
 Do not summarize, quote, or hint at the scan results.
 
 ## Phase: review
@@ -172,7 +185,7 @@ Work through this in order.
 The order is the point: it keeps the human's first impression their own.
 
 1. **Orient.** Show `guide.md`, and any flow/call-graph/residue artifact. Nothing else.
-2. **Their pass.** Let them read the change and talk, writing in `notes.md` as they go. Capture anything they say aloud verbatim into `notes.md` under the relevant file heading (or `Cross-cutting`), so the file stays the single record of their pass. Re-read `notes.md` before each reply - they may have edited it in their editor since. Answer clarifying questions about the code; do not volunteer opinions on quality. Unticked `read` boxes at the end are files they have not been through; mention them, do not judge them.
+2. **Their pass.** Let them read the change and talk, writing in `notes.md` as they go. Capture anything they say aloud verbatim into `notes.md` under `Notes`, prefixed with the file or `path:line` it concerns, so the file stays the single record of their pass. Re-read `notes.md` before each reply - they may have edited it in their editor since. Answer clarifying questions about the code; do not volunteer opinions on quality. On the `quick` tier, if there is no `notes.md`, take notes in the conversation and write them into `verdict.md` at transcription instead.
 3. **Reveal the scan.** Run `python3 scripts/scaffold_verdict.py --id <id> --add-scan` to fill the scan disposition rows into `verdict.md` - it touches nothing else in the file and is safe to rerun. Then show `scan.md`. For each finding ask whether it is real, and whether they want it in the verdict. A scan failure is **not** a review point until the reviewer adopts it - otherwise the scan quietly authors blockers. Record rejected findings as false positives; the retro needs them.
 4. **Human-only checklist.** List every `Active: true` rule in `REVIEW_STANDARDS.md` with `Checkable by: human`. These were never scanned. Work through each one; AI silence is not evidence.
 5. **Transcribe the verdict.** `verdict.md` was scaffolded during prep, and step 3 added the disposition rows. If it is missing (a review prepped before this was automatic), scaffold it now with `python3 scripts/scaffold_verdict.py --id <id>`. Re-read it first - the reviewer may have drafted into it already. Then fill it in from what the reviewer said and wrote in `notes.md`. Walk the notes with them file by file: for each note, ask whether it becomes a point, and at what severity. Shorthand like `!` or `~` is a hint for that question, never an answer to it. Their `Not reviewed` notes seed the verdict's `Not reviewed` section, verbatim. See the transcription rules.
@@ -185,6 +198,12 @@ Optional, and only on the reviewer's request, after the verdict is transcribed.
 It comes last so it cannot shape their first impression or their verdict.
 
 Read `notes.md` and `verdict.md`, then raise any points you disagree with or think deserve another look.
+
+**Raise only what you would call a blocker or a follow-up.**
+Across the first ten reviews, 9 of 10 agent points were rejected.
+Most were real but not worth raising: "not realistic", "fine for now", "already requested elsewhere", a missing test for a defensive branch.
+Do not raise nitpicks, untested trivial branches, things the author clearly chose, or things you know are tracked elsewhere.
+Zero points is a normal outcome, not a failure.
 
 - **Confirm before raising.** Check every concern against the code first: trace the logic, read the tests. A concern you could not confirm is either mentioned as checked-and-dropped or not mentioned at all. An unverified hunch costs the reviewer the time you skipped.
 - **Look hardest where they did not.** Spend most of the pass on the areas listed under `Not reviewed`.
@@ -201,7 +220,8 @@ Read `notes.md` and `verdict.md`, then raise any points you disagree with or thi
     ```
   ````
 
-Record every point raised in a `## Agent points` table in `verdict.md` - `Point | Where | Disposition` - with the reviewer's call on each: `adopted`, `rejected - intended`, or `rejected - wrong`.
+Record every point raised in a `## Agent points` table in `verdict.md` - `Point | Where | Disposition` - with the reviewer's call on each: `adopted`, `rejected - intended`, `rejected - not worth raising`, or `rejected - wrong`.
+Ask which one; "real but not worth it" is `not worth raising`, not `intended`.
 See `references/verdict-format.md`.
 The retro uses it to judge whether this pass earns its place.
 
@@ -257,7 +277,7 @@ The essentials:
 - **Metadata stays outside the fenced blocks.** Severity and rule tags go in the heading; the block holds only what gets pasted. The author does not care that a comment came from R-003.
 - **Line comments group by file**, in diff order, then by line. Pasting is per-file navigation - grouping by severity makes you open the same file three times.
 - **Every point is a checkbox.** Pasting twelve comments is interruptible; the file is a worklist, not a document.
-- **Scan disposition table** records what you decided about each scan finding - `adopted`, `false positive`, `agreed`, `checked, ok`, `not reached`, `missed`. This is the only place the scan gets graded, and the retro's main input.
+- **Scan disposition table** records what you decided about each scan finding - `adopted`, `false positive`, `not raised`, `agreed`, `checked, ok`, `not reached`, `missed`. This is the only place the scan gets graded, and the retro's main input.
 
 Tag every point with the RuleID it came from, or `new` if no rule covers it.
 You may propose the tag by matching the point against the rules; the reviewer confirms it.
@@ -269,14 +289,62 @@ The parser rejects those rather than defaulting them, which is the intended beha
 
 ## Phase: retro
 
-Not yet implemented.
-It will read accumulated `record.json` files and propose amendments to `REVIEW_STANDARDS.md`: new rules from recurring `new` points, `Active: false` for rules that keep producing false positives, and artifact types nobody reads.
+Run periodically, across many reviews, to make the process faster and the standards sharper.
+Like the review itself, the retro proposes and a human decides: never edit `REVIEW_STANDARDS.md`, the prompts or the scripts without the reviewer agreeing to each change.
 
-It should also:
+### 1. Fill the mechanical gaps
 
-- Read `reviewer_notes` when proposing changes to the process or the artifacts.
-- Flag it when `agent_points` are mostly rejected, as a sign the second-opinion pass is noisy.
-- Skip records with `scan.ran: false` when computing scan statistics.
+```
+python3 scripts/retro.py backfill            # dry run
+python3 scripts/retro.py backfill --write
+```
+
+Fills only script-derived fields (`files`, `hunks`, `mechanical_ratio`, `passes`, `artifacts_generated`, `scan.ran`, `tier`) from each artifact directory.
+Reviewer fields stay missing until the reviewer supplies them - never backfill `artifacts_used`, `not_reviewed` or `wall_minutes`.
+
+### 2. Run the report
+
+```
+python3 scripts/retro.py [--repo <name>] [--since YYYY-MM-DD] [--json]
+```
+
+It prints the aggregates: reviews and time by tier, classification hit rates, artifact use against generation, scan results per rule (only records with `scan.ran: true`), second-opinion dispositions, every `new` point, reviewer notes verbatim, and data-quality gaps.
+It also prints `Flags`: rules with two false positives, rules that fire and are never adopted, rules never fired, classes that match nearly everything, artifacts nobody uses, and a noisy second-opinion pass.
+Show the report to the reviewer as is.
+
+### 3. Read what the numbers cannot
+
+- **Reviewer notes.** Group them by theme. A complaint repeated across reviews counts as much as any flag.
+- **`new` points.** Judge recurrence by meaning, not wording. Two that say the same thing make a candidate rule; draft it in the `references/standards-format.md` shape.
+- **Classification against the notes.** Where the reviewer asked "why is this a deep cut?", rerun `classify.py` on that range (`.repo_path` and `.range` from its `classify.json`) and find the signal that fired.
+- **Time against tier.** A `quick` review that took as long as a `standard` one means the tier bounds are wrong.
+
+### 4. Propose, then land with approval
+
+Present the proposals as a short list, highest impact first, each with its evidence: the record IDs and the numbers or quotes behind it.
+Typical targets:
+
+| Finding                             | Proposal                                          |
+| ----------------------------------- | ------------------------------------------------- |
+| Rule with 2+ false positives        | `Active: false` in `REVIEW_STANDARDS.md`          |
+| Rule fired often, only `not raised` | Lower its severity, or retire it                  |
+| Rule `missed`                       | Widen `Applies when`, or make the check evaluable |
+| Recurring `new` point               | A new rule                                        |
+| Artifact generated, rarely used     | Drop it from that class in `classify.py` `wants`  |
+| Class matching nearly every review  | Tighten its signal or threshold in `classify.py`  |
+| Agent points mostly rejected        | Tighten the second-opinion guidance in this file  |
+| Reviewer-note theme                 | Change the prompt or scaffold it is about         |
+
+`REVIEW_STANDARDS.md` lives in the reviewed repo and is read by the team, so edit it there and leave committing to the reviewer.
+After changes to `classify.py`, rerun it on the past ranges that still resolve, and show how each review would now be classified.
+
+### Escaped defects
+
+When a bug is traced back to a reviewed change, record it - it is the only real measure of whether the process works:
+
+```
+python3 scripts/retro.py escaped --repo <repo> --id <id> --note "<what escaped, and where it was fixed>"
+```
 
 ## References
 

@@ -2,7 +2,7 @@
 
 Produces `callgraph.md`: who calls the changed code, and what the changed code calls.
 
-Generated for `deep_cut` and `risky_surface`.
+Generated for `risky_surface` only. It was dropped from `deep_cut` after six deep cuts in a row generated it and none used it.
 Its purpose is blast radius - showing the reviewer which untouched code is nevertheless affected.
 
 ## Inputs

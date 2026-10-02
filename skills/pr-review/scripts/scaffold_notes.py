@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """scaffold_notes.py - a scratchpad for the reviewer's own pass.
 
-Writes <artifacts>/notes.md: frontmatter, a heading per changed file in diff
-order with its +/- counts and a "read" checkbox, and a few empty sections for
-thoughts that do not belong to one file.
+Writes <artifacts>/notes.md: a title, one comment line, and three empty
+sections. No frontmatter, no checkboxes, no per-file headings - the first ten
+reviews found that structure "clunky" and left 8 of 9 file lists untouched.
+The reviewer writes a file name (or `path:line`) and a note, in any shape.
+
+--files restores a heading per changed file in diff order, for a reviewer who
+wants the list to hand. Even then there are no "read" checkboxes.
 
 notes.md is the reviewer's, not the agent's. It is never parsed into the
 record and never posted; it is raw material the reviewer later dictates the
 verdict from. The scaffold contains structure only - no observations, no scan
 findings, no opinions.
 
-Every changed file is listed, not only code: a note on a migration, a config
-key or a changed test expectation is as useful as one on a .java file.
+The quick tier skips notes.md altogether unless the reviewer asks for it.
 
 Usage:
     scaffold_notes.py --id STONE-1494                  # resolve via config
     scaffold_notes.py --artifacts ~/notes/pr-reviews/cod-backend/STONE-1494
-    scaffold_notes.py --id STONE-1494 --update         # add files not yet listed
+    scaffold_notes.py --id STONE-1494 --files          # with a heading per file
     scaffold_notes.py --id STONE-1494 --update --range <since_last_pass>
-                                                       # ...and flag listed ones to re-read
+                                                       # list what changed again
     scaffold_notes.py --id STONE-1494 --force          # overwrite existing
 """
 import argparse
@@ -86,90 +89,64 @@ def file_block(path, added, deleted, renamed_from=None):
     stat = stat_of(added, deleted)
     if renamed_from:
         stat += f", renamed from {renamed_from}"
-    return [f"### {path}", "", f"- [ ] read  ({stat})", "", ""]
+    return [f"### {path}", "", f"<!-- {stat} -->", "", ""]
 
 
-def build(artifacts, files, state, cls):
-    passes = state.get("passes") or [{}]
-    head_sha = (passes[-1].get("head_sha") or "")[:7]
+def build(artifacts, files, state, cls, with_files=False):
     rid = state.get("id") or artifacts.name
-
     L = [
-        "---",
-        f"id: {rid}",
-        f"repo: {state.get('repo') or ''}",
-        f"head_sha: {head_sha}",
-        f"range: {cls.get('range') or ''}",
-        f"started: {dt.date.today().isoformat()}",
-        "---",
+        f"# Notes: {rid}",
         "",
-        f"# Review notes: {rid}",
+        "<!-- Scratchpad, never posted. Write `path:line note` or a `### path` heading, "
+        "any shape. -->",
         "",
-        "<!--",
-        "Your scratchpad for the pass through the diff. Nothing here is posted",
-        "and nothing here is parsed. Write as you go, in any shape; the verdict",
-        "is transcribed from these notes later, with your confirmation.",
+        "## Notes",
         "",
-        "Optional shorthand, so notes are easy to triage at verdict time:",
-        "",
-        "  :88   line reference        ?  question for the author or yourself",
-        "  !     probable blocker      ~  nitpick",
-        "  >     follow-up / ticket    ok looked at it, fine",
-        "",
-        "Tick \"read\" when you have been through a file, so an interrupted",
-        "review shows where you stopped.",
-        "-->",
-        "",
-        "## First impressions",
-        "",
-        "<!-- Before reading closely: what do you expect this change to do? -->",
-        "",
-        "",
-        FILES_SECTION,
-        "",
-        f"<!-- {len(files)} changed files, in diff order. -->",
         "",
     ]
-    for f in files:
-        L += file_block(*f)
+    if with_files:
+        L += [FILES_SECTION, ""]
+        for f in files:
+            L += file_block(*f)
     L += [
-        "## Cross-cutting",
-        "",
-        "<!-- Things that span files: design, naming, scope, what is missing. -->",
-        "",
-        "",
         "## Questions",
-        "",
-        "<!-- For the author, or to resolve before concluding. -->",
         "",
         "",
         "## Not reviewed",
-        "",
-        "<!-- What you skipped or skimmed, and why. -->",
         "",
     ]
     return "\n".join(L)
 
 
 def update(text, files, reread):
-    """Insert headings for files not yet in notes.md.
+    """Bring notes.md up to date with a new pass.
 
-    With reread, files already listed also get a re-read checkbox under their
-    heading - used when files is the since_last_pass range, so the reviewer
-    can see which notes may be stale. Returns (text, added, flagged).
+    A notes.md with a ## Files section gets headings for files not yet listed,
+    and with reread, a re-read line under already-listed files in the range.
+    A minimal notes.md gets one appended section listing what changed, marking
+    the files the reviewer already wrote about. Returns (text, added, flagged).
     """
+    today = dt.date.today().isoformat()
     lines = text.splitlines()
+    if FILES_SECTION not in lines:
+        mentioned = [f for f in files if f[0] in text or Path(f[0]).name in text]
+        block = ["", f"## Changed since last pass ({today})", ""]
+        for f in files:
+            mark = "  - re-read, you noted this" if f in mentioned else ""
+            block.append(f"- `{f[0]}` ({stat_of(f[1], f[2])}){mark}")
+        return ("\n".join(lines + block) + "\n", [f[0] for f in files],
+                [f[0] for f in mentioned])
+
     present = {m.group(1): i for i, line in enumerate(lines) if (m := FILE_HEADING.match(line))}
     missing = [f for f in files if f[0] not in present]
     flagged = [f for f in files if f[0] in present] if reread else []
-    today = dt.date.today().isoformat()
 
     # Bottom-up, so earlier indexes stay valid.
     for f in sorted(flagged, key=lambda f: present[f[0]], reverse=True):
         at = present[f[0]] + 1
         while at < len(lines) and not lines[at].strip():
             at += 1
-        lines.insert(at, f"- [ ] re-read: changed again {today}  ({stat_of(f[1], f[2])})")
+        lines.insert(at, f"- re-read: changed again {today}  ({stat_of(f[1], f[2])})")
 
     if missing:
         try:
@@ -197,9 +174,11 @@ def main():
     ap.add_argument("--range", help="diff range; defaults to classify.json's")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--update", action="store_true",
-                      help="add headings for changed files not yet in notes.md; with --range, "
-                           "also flag already-listed files in that range for a re-read")
+                      help="record what changed since the last pass; pair with --range "
+                           "<since_last_pass>")
     mode.add_argument("--force", action="store_true", help="overwrite a non-empty notes.md")
+    ap.add_argument("--files", action="store_true",
+                    help="add a heading per changed file (off by default)")
     args = ap.parse_args()
 
     if args.artifacts:
@@ -235,7 +214,7 @@ def main():
         sys.exit(f"{out} already has content - pass --update to add new files, "
                  "or --force to overwrite")
 
-    out.write_text(build(artifacts, files, state, cls))
+    out.write_text(build(artifacts, files, state, cls, with_files=args.files))
     print(json.dumps({"written": str(out), "files": len(files)}, indent=2))
 
 

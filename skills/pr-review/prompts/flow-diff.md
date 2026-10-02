@@ -2,7 +2,7 @@
 
 Produces `flow.md`: how the logic flowed before, how it flows after, and the delta between them.
 
-Generated for `narrow_behavioural` and above.
+Generated for `narrow_behavioural`, `wide_behavioural`, `deep_cut` and `risky_surface` - never for the `quick` tier.
 This is the artifact that answers "what actually changes at runtime", which a diff shows only indirectly.
 
 ## Inputs

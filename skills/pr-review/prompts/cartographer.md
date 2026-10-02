@@ -35,15 +35,53 @@ Quote them; do not re-derive them.
 
 **Do not pad.**
 Every line costs the reader time, and saving their time is the entire purpose of this artifact.
+The first ten reviews called a 45-line guide on an 11-file change "way too wordy".
+Length scales with `classify.json` `.tier`, and the caps below are maxima, not targets:
+
+| Tier       | Max lines | Sections                                                     |
+| ---------- | --------- | ------------------------------------------------------------ |
+| `quick`    | 15        | Header, `Why this change exists` (1-2 sentences), `Files` list |
+| `standard` | 30        | All sections, `Worth a closer look` capped at 3              |
+| `large`    | 50        | All sections                                                 |
+
+**Lead with the depth, not the detail.**
+The reviewer's first question is "how carefully do I need to read this?".
+The first line after the title answers it from `.tier` and `.effort`, so a low-risk change reads as low-risk before anything else does.
 
 ## Output
 
 Write `guide.md` exactly in this shape.
 
+### Quick tier
+
+When `.tier` is `quick`, write only this, and nothing else:
+
 ````markdown
 # Review Guide: <id>
 
-**Classification:** <matched classifications, comma separated> - <N> files, <M> hunks
+**Quick review (<effort>)** - <N> files, <M> hunks, nothing deep or risky detected.
+<If `.adjudicate` is non-empty, one line: "Unresolved: <keys> - <why, quoted>".>
+
+## Why this change exists
+
+<1-2 sentences, same rules as below.>
+
+## Files
+
+- `<path>` - <role, a few words>
+<Code files only, in reading order. Tests and docs as one closing line.>
+````
+
+No `Worth a closer look`, no `Questions for the author`, no `Other artifacts`.
+If something genuinely consequential stands out, it is a sign the tier is wrong: say so in one line under the header - "Tier may be too low: <fact>" - rather than writing the full guide.
+
+### Standard and large tiers
+
+````markdown
+# Review Guide: <id>
+
+**<Standard|Large> review (<effort>)** - <N> files, <M> hunks
+**Classification:** <matched classifications, comma separated>
 <one line per matched classification, quoting the `why` from classify.json>
 
 ## Why this change exists
@@ -72,7 +110,7 @@ e.g. "9 test files following the above; 43 generated doc rows".>
 
 - `<path>:<line>` - <neutral observation and the question it raises>
 
-<Zero to five entries. These are places where the change is consequential or
+<Zero to five entries (three for `standard`). These are places where the change is consequential or
 hard to verify from the diff alone, phrased as observations and questions, not
 findings. If nothing qualifies, write "Nothing stood out" - do not manufacture
 entries.>

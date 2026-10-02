@@ -186,11 +186,12 @@ Copied into the record as `reviewer_notes` for the retro; leaving it empty is fi
 Present only when the reviewer asked for the optional second-opinion pass.
 One row per point the agent raised, with what the reviewer decided:
 
-| Disposition           | Meaning                                 |
-| --------------------- | --------------------------------------- |
-| `adopted`             | The reviewer added it as a review point |
-| `rejected - intended` | Real behaviour, but the author meant it |
-| `rejected - wrong`    | The agent misread the code              |
+| Disposition                    | Meaning                                 |
+| ------------------------------ | --------------------------------------- |
+| `adopted`                      | The reviewer added it as a review point |
+| `rejected - intended`          | Real behaviour, but the author meant it |
+| `rejected - not worth raising` | Real, but too small to raise            |
+| `rejected - wrong`             | The agent misread the code              |
 
 An adopted point also appears above as a normal entry, with a severity the reviewer gave.
 The section's absence means the pass did not run; an empty table means it ran and raised nothing.
@@ -199,14 +200,15 @@ The section's absence means the pass did not run; an empty table means it ran an
 
 Every rule the scan reported on, and what the reviewer decided.
 
-| Reviewer value   | Meaning                                              |
-| ---------------- | ---------------------------------------------------- |
-| `adopted`        | Became a review point above                          |
-| `false positive` | Fired and was wrong - the retro counts these         |
-| `agreed`         | Correct, but not worth raising with the author       |
-| `checked, ok`    | A `human` rule the reviewer verified and found fine  |
-| `not reached`    | A `human` rule the reviewer did not get to           |
-| `missed`         | Scan said pass, but the thing it checks for is there |
+| Reviewer value   | Meaning                                                |
+| ---------------- | ------------------------------------------------------ |
+| `adopted`        | Became a review point above                            |
+| `false positive` | Fired and was wrong - the retro counts these           |
+| `not raised`     | Fired correctly, but not worth raising with the author |
+| `agreed`         | Scan said pass, and the reviewer agrees                |
+| `checked, ok`    | A `human` rule the reviewer verified and found fine    |
+| `not reached`    | A `human` rule the reviewer did not get to             |
+| `missed`         | Scan said pass, but the thing it checks for is there   |
 
 ### Which disposition fits what the scan said
 
@@ -215,16 +217,17 @@ The mistake that matters is marking a **failure** as `checked, ok`: that reads a
 
 | Scan said  | Valid dispositions                                           |
 | ---------- | ------------------------------------------------------------ |
-| `fail`     | `adopted`, `false positive`, `agreed`                        |
-| `undet`    | `adopted`, `false positive`, `agreed`, `checked, ok`, `not reached` |
+| `fail`     | `adopted`, `false positive`, `not raised`                    |
+| `undet`    | `adopted`, `false positive`, `not raised`, `checked, ok`, `not reached` |
 | `pass`     | `agreed`, `missed`                                           |
 | `deferred` | `adopted`, `checked, ok`, `not reached`                      |
 
-For a failure you disagree with, the choice is between `false positive` (the rule was wrong) and `agreed` (the rule was right, you just are not raising it with the author).
+For a failure you disagree with, the choice is between `false positive` (the rule was wrong) and `not raised` (the rule was right, you just are not raising it with the author).
 They look similar in the moment and diverge completely over time: one retires the rule, the other keeps it.
+Older verdicts used `agreed` for the second; the parser still accepts it on a failure, with a warning, and records it as `not raised`.
 
 This table is the single highest-value part of the file for the retro.
-`false positive` twice for the same rule retires it; `not reached` repeatedly means the rule is impractical as written.
+`false positive` twice for the same rule retires it; `not raised` repeatedly means it is right but not valuable; `not reached` repeatedly means the rule is impractical as written.
 It is also the only place where the agent's scan is graded, which is why the reviewer fills it and the agent does not.
 
 ## Scaffolding

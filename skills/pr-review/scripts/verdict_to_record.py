@@ -27,7 +27,10 @@ import sys
 from pathlib import Path
 
 SEVERITIES = {"blocker", "nitpick", "follow-up"}
-AGENT_DISPOSITIONS = {"adopted", "rejected - intended", "rejected - wrong"}
+# "not worth raising" exists because 9 of the first 10 agent points were filed
+# as "rejected - intended" when the honest call was "real, but not worth it".
+AGENT_DISPOSITIONS = {"adopted", "rejected - intended", "rejected - wrong",
+                      "rejected - not worth raising"}
 # Files whose presence in the artifact directory means the artifact was made.
 GENERATED = ("guide", "flow", "callgraph", "residue", "rollback", "scan")
 # What artifacts_used may name: the generated ones plus the reviewer's notes.
@@ -37,6 +40,8 @@ NOT_STATED = "<not stated>"
 
 DISPOSITIONS = {
     "adopted", "false positive", "agreed", "checked, ok", "not reached",
+    # a failure that was correct but not worth raising with the author
+    "not raised",
     # the scan said pass but the reviewer found the thing it was checking for
     "missed",
 }
@@ -51,7 +56,11 @@ POINT = re.compile(
 FILE_HEADING = re.compile(r"^###\s+(?P<path>\S+)\s*$")
 FENCE = re.compile(r"^\s*(```|~~~)")
 # notes.md lines that are scaffold structure, or say "looked, fine", not notes.
-NOTES_NON_NOTE = re.compile(r"^\s*(-\s*\[[ xX]\]\s*(read|re-read)\b|ok\b)", re.I)
+NOTES_NON_NOTE = re.compile(r"^\s*(-\s*(\[[ xX]\]\s*)?(read|re-read)\b|ok\b)", re.I)
+# A freeform note that starts with a file: "Foo.ts:88 why?" or "`src/a/b.ts` ...".
+NOTE_PATH = re.compile(r"^\s*[-*]?\s*`?(?P<path>[\w.@/-]+\.\w+)(:\d+)?`?[\s:,-]")
+# notes.md sections whose lines are not notes about a file.
+NOTES_SKIP_SECTIONS = ("questions", "not reviewed", "changed since last pass")
 TITLE = re.compile(r"^#\s+Verdict:\s*\S+\s*-\s*(?P<verdict>.+?)\s*$")
 
 # Which dispositions make sense for what the scan said. A failure marked
@@ -59,14 +68,17 @@ TITLE = re.compile(r"^#\s+Verdict:\s*\S+\s*-\s*(?P<verdict>.+?)\s*$")
 # was violated - and it silently drops the finding from false_positives, which
 # is the retro's only evidence for retiring a noisy rule.
 COMPATIBLE = {
-    "fail": {"adopted", "false positive", "agreed"},
-    "undet": {"adopted", "false positive", "agreed", "checked, ok", "not reached"},
+    # "agreed" on a failure is the legacy spelling of "not raised"; accepted
+    # with a warning so older verdicts still parse.
+    "fail": {"adopted", "false positive", "not raised", "agreed"},
+    "undet": {"adopted", "false positive", "not raised", "agreed", "checked, ok",
+              "not reached"},
     "pass": {"agreed", "missed"},
     "deferred": {"adopted", "checked, ok", "not reached"},
 }
 HINT = {
     ("fail", "checked, ok"): "use 'false positive' if the rule was wrong, "
-                              "'agreed' if it was right but not worth raising, "
+                              "'not raised' if it was right but not worth raising, "
                               "'adopted' if you raised it",
     ("pass", "checked, ok"): "a passing rule needs no human check - use 'agreed', "
                              "or 'missed' if it should have failed",
@@ -134,6 +146,7 @@ def parse(path):
     section, current_file = None, None
     not_reviewed, reviewer_notes, unparsed = [], [], []
     has_agent_section = False
+    legacy_agreed = []
     # Line comments bookkeeping: inside a fenced block, and whether the last
     # significant line was a point (so the next fence is its comment block).
     in_fence, after_point = False, False
@@ -210,6 +223,9 @@ def parse(path):
                 errors.append(
                     f"line {i+1}: {rule} scan said {said!r} but disposition is {decided!r}"
                     + (f" - {hint}" if hint else ""))
+            if said in ("fail", "undet") and decided == "agreed":
+                legacy_agreed.append(rule)
+                decided = "not raised"
             scan_rows.append({"rule": rule, "scan": said, "reviewer": decided})
 
     title_verdict = next(
@@ -230,6 +246,9 @@ def parse(path):
     # artifacts_used is the reviewer's to state - never derived, never defaulted.
     used = meta.get("artifacts_used", NOT_STATED)
     warnings = []
+    if legacy_agreed:
+        warnings.append(f"{', '.join(legacy_agreed)}: 'agreed' on a failure is now spelled "
+                        f"'not raised' - recorded as not raised")
     if not isinstance(used, list):
         errors.append(f"frontmatter artifacts_used is {used!r} - ask the reviewer which "
                       f"artifacts they used, e.g. [flow, guide, notes]; [] if none")
@@ -249,6 +268,8 @@ def parse(path):
         "classification": meta.get("classification", []),
         "verdict": verdict,
     }
+    if cls and cls.get("tier"):
+        record["tier"] = cls["tier"]
 
     # Mechanical fields. Omitted, with a warning, rather than guessed.
     signals = (cls or {}).get("signals") or {}
@@ -277,6 +298,7 @@ def parse(path):
             "adopted": [r["rule"] for r in scan_rows if r["reviewer"] == "adopted"],
             "false_positives": [r["rule"] for r in scan_rows
                                 if r["reviewer"] == "false positive"],
+            "not_raised": [r["rule"] for r in scan_rows if r["reviewer"] == "not raised"],
             "not_reached": [r["rule"] for r in scan_rows if r["reviewer"] == "not reached"],
             "missed": [r["rule"] for r in scan_rows if r["reviewer"] == "missed"],
         }
@@ -348,20 +370,32 @@ def orphan_notes(notes_path, points):
     if not notes_path.exists():
         return []
     text = strip_html_comments(notes_path.read_text())
-    noted, current = [], None
+    noted, current, skip = [], None, False
     for raw in text.splitlines():
         if raw.startswith("## "):
             current = None
+            skip = raw[3:].strip().lower().startswith(NOTES_SKIP_SECTIONS)
+            continue
+        if skip:
             continue
         if (m := FILE_HEADING.match(raw)):
             current = m.group("path")
             continue
-        if current and raw.strip() and not NOTES_NON_NOTE.match(raw):
-            if current not in noted:
-                noted.append(current)
+        if not raw.strip() or NOTES_NON_NOTE.match(raw):
+            continue
+        # Freeform notes name their file inline; headings name it above.
+        if (m := NOTE_PATH.match(raw)):
+            target = m.group("path")
+        else:
+            target = current
+        if target and target not in noted:
+            noted.append(target)
     entries = {p["path"].rsplit(":", 1)[0] if re.search(r":\d+$", p["path"] or "")
                else p["path"] for p in points if p["path"]}
-    return [f for f in noted if not any(heading_matches(e, f) for e in entries)]
+    # A freeform note may name only the file, not its path.
+    return [f for f in noted
+            if not any(heading_matches(e, f) or ("/" not in f and e.endswith("/" + f))
+                       for e in entries)]
 
 
 def extract_block(lines, start):

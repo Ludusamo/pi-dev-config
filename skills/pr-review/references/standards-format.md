@@ -103,6 +103,11 @@ Usually `file:line`.
 For `human` rules it may be a link or a named source.
 A rule whose evidence cannot be named is not checkable - rewrite or drop it.
 
+**Retro note.**
+Optional.
+One line on why the retro changed the rule, citing the review IDs that drove it.
+It is history for the next reader, not part of the check, and the scanner ignores it.
+
 ### `# Risky Surfaces`
 
 A flat bullet list, parsed into two buckets automatically:
@@ -157,7 +162,8 @@ The practical test: if the classification mix comes out mostly "everything at ma
 1. A review produces points tagged with a RuleID, or marked `new`.
 2. `new` points that recur twice become a candidate rule.
 3. Rules that fire and are judged wrong twice get `Active: false`.
-4. Rules that have never fired across N reviews get questioned.
+4. Rules that fire and are only ever `not raised` get a lower severity, or `Active: false`.
+5. Rules that have never fired across N reviews get questioned.
 
-Steps 2-4 are `pr-review-retro`'s job.
+Steps 2-5 are the retro's job: `scripts/retro.py` computes and flags them, and the `retro` phase in `SKILL.md` turns the flags into proposals.
 It proposes the edits; a human lands them, because this file is versioned with the code and the team reads it.

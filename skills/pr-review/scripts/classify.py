@@ -29,7 +29,15 @@ ASSERT = re.compile(
     r"\b(assert\w*|Assert\w*|expect|verify|thenReturn|willReturn|isEqualTo"
     r"|isTrue|isFalse|hasSize|containsExactly|shouldBe|toEqual|toBe)\b"
 )
-TESTP = re.compile(r"(^|/)(src/test|tests?)/|Tests?\.(java|kt)$|_test\.(py|go)$|\.spec\.(ts|tsx|js)$")
+TESTP = re.compile(
+    r"(^|/)(src/test|tests?|__tests__)/|Tests?\.(java|kt)$|_test\.(py|go)$"
+    r"|\.(spec|test)\.(ts|tsx|js|jsx)$"
+)
+# Generated code is regenerated, not reviewed, and it re-exports every model it
+# contains - counting it as a consumer inflated deep cuts on the frontend.
+GENERATED = re.compile(
+    r"(^|/)(api-generated|generated|__generated__|gen)/|\.generated\.|\.g\.(ts|dart)$"
+)
 CODE = re.compile(r"\.(java|kt|py|ts|tsx|js|go|sql|rb|cs)$")
 SHARED = re.compile(
     r"(^|/)(model|models|dto|dtos|contract|contracts|schema|schemas|interface|interfaces|proto)/"
@@ -51,6 +59,20 @@ TRAILING_PUNCT = " \t,;)}]{"
 MECHANICAL_RATIO = 0.80          # >= this and no changed expectations -> mechanical
 MECHANICAL_GREY = 0.60           # between grey and ratio -> undetermined
 DEEP_CONSUMERS = 2               # shared symbol with >= N consumers -> deep cut
+# One rewritten line in a shared type (a reordered component, a widened type)
+# was enough to call a change deep, and the reviewer disagreed every time.
+DEEP_SUBSTANTIVE = 3             # substantive deletions in that file -> deep cut
+# Size, not mechanical ratio, is what makes a behavioural change wide.
+WIDE_CODE_FILES = 25             # >= this many code files -> wide_behavioural
+WIDE_CODE_HUNKS = 150            # ... or this many code hunks
+# The quick tier: small, nothing deep, nothing risky. Calibrated on the first
+# ten reviews, where every change under these bounds was approved with no
+# points and the reviewer said the artifacts slowed them down.
+QUICK_CODE_FILES = 15
+QUICK_CODE_HUNKS = 80
+# Rough effort per tier, for the guide's first line. Recalibrate from the
+# wall_minutes the retro reports.
+EFFORT = {"quick": "~10-20 min", "standard": "~20-30 min", "large": "~60+ min"}
 GREP_GLOBS = ["*.java", "*.kt", "*.ts", "*.tsx", "*.py", "*.go", "*.sql"]
 # core.autocrlf on Windows otherwise reports every line of a file as changed,
 # which would drown the mechanical ratio and the residue list in noise.
@@ -259,7 +281,7 @@ def main(args):
 
     shared = []
     for f in paths:
-        if not CODE.search(f):
+        if not CODE.search(f) or TESTP.search(f) or GENERATED.search(f):
             continue
         # Per-repo globs win when present: the default regex is far too broad for
         # a BFF where every feature MR appends a field to some DTO.
@@ -271,11 +293,12 @@ def main(args):
             continue
         symbol = Path(f).stem
         hits = git(grep_root, "grep", "-l", "-w", symbol, "--", *GREP_GLOBS).splitlines()
-        consumers = [h for h in hits if h != f and not TESTP.search(h)]
+        consumers = [h for h in hits
+                     if h != f and not TESTP.search(h) and not GENERATED.search(h)]
         # Appending a field to a shared type is routine and backward compatible.
         # Deleting or rewriting an existing line is what forces consumers to follow.
         shared.append({"file": f, "symbol": symbol, "consumers": len(consumers),
-                       "modified": real_deletions.get(f, 0) > 0,
+                       "modified": real_deletions.get(f, 0) >= DEEP_SUBSTANTIVE,
                        "deletions": raw_deletions.get(f, 0),
                        "substantive_deletions": real_deletions.get(f, 0),
                        "sample": consumers[:5]})
@@ -342,23 +365,36 @@ def main(args):
     else:
         wide = decide(False, f"mechanical_ratio {ratio} below {MECHANICAL_GREY}")
 
+    is_behavioural = bool(changed_expectations) or ratio < MECHANICAL_RATIO
+    big = code_files >= WIDE_CODE_FILES or len(hunks) >= WIDE_CODE_HUNKS
+    size = (f"{code_files} code file(s), {len(hunks)} code hunk(s), "
+            f"{len(subsystems)} subsystem(s)")
     behavioural = decide(
-        bool(changed_expectations) or ratio < MECHANICAL_RATIO,
-        f"{len(changed_expectations)} file(s) with changed expectations; "
-        f"{len(subsystems)} subsystem(s) touched",
+        is_behavioural and not big,
+        f"{len(changed_expectations)} file(s) with changed expectations; {size}",
+    )
+    wide_behavioural = decide(
+        is_behavioural and big,
+        f"behavioural across {size} (wide at >= {WIDE_CODE_FILES} code files "
+        f"or >= {WIDE_CODE_HUNKS} code hunks)",
     )
 
     if deep_code:
-        deep = decide(True, f"shared contract {Path(deep_code[0]['file']).name} modified "
-                            f"(not merely appended to), {deep_code[0]['consumers']} consumers")
+        d = max(deep_code, key=lambda s: s["substantive_deletions"])
+        deep = decide(True, f"shared contract {Path(d['file']).name} modified "
+                            f"({d['substantive_deletions']} substantive deletion(s), "
+                            f">= {DEEP_SUBSTANTIVE}), {d['consumers']} consumers")
     elif migrations:
         deep = decide(True, f"{len(migrations)} migration file(s) present")
     elif additive_only:
         s = additive_only[0]
         detail = (f" ({s['deletions']} deleted line(s), all comment or blank)"
                   if s["deletions"] else "")
+        if s["substantive_deletions"]:
+            detail = (f" ({s['substantive_deletions']} substantive deletion(s), "
+                      f"under {DEEP_SUBSTANTIVE})")
         deep = decide(False, f"shared contract {Path(s['file']).name} touched but additive "
-                             f"only{detail} - no consumer is forced to follow")
+                             f"or near-additive{detail} - no consumer is forced to follow")
     elif contract_docs and multi_subsystem:
         deep = decide("undetermined", "contract doc changed across multiple subsystems, "
                                       "but no shared code type modified")
@@ -376,27 +412,54 @@ def main(args):
     else:
         risky_cls = decide(False, "no risky-surface match")
 
+    # Undetermined deep/risky does not block quick: risky_surface is undetermined
+    # on almost every change, and the adjudicate list still surfaces the question.
+    small = code_files <= QUICK_CODE_FILES and len(hunks) <= QUICK_CODE_HUNKS
+    quick = decide(
+        small and wide["matched"] is not True and deep["matched"] is not True
+        and risky_cls["matched"] is not True,
+        f"{code_files} code file(s), {len(hunks)} code hunk(s) (quick at <= "
+        f"{QUICK_CODE_FILES} and <= {QUICK_CODE_HUNKS}); deep_cut {deep['matched']}, "
+        f"risky_surface {risky_cls['matched']}",
+    )
+
     classification = {
+        "quick": quick,
         "wide_mechanical": wide,
         "narrow_behavioural": behavioural,
+        "wide_behavioural": wide_behavioural,
         "deep_cut": deep,
         "risky_surface": risky_cls,
     }
 
+    # callgraph was generated for six deep cuts and used in none, so deep_cut no
+    # longer asks for it; risky_surface keeps it until the retro says otherwise.
     wants = {
+        "quick": ["guide"],
         "wide_mechanical": ["guide", "residue"],
         "narrow_behavioural": ["guide", "flow"],
-        "deep_cut": ["guide", "flow", "callgraph"],
+        "wide_behavioural": ["guide", "flow"],
+        "deep_cut": ["guide", "flow"],
         "risky_surface": ["guide", "flow", "callgraph", "rollback"],
     }
-    artifacts = {a for k, v in classification.items() if v["matched"] is True for a in wants[k]}
-    artifacts.add("guide")  # floor: the default classification always gets a partial guide
+    if quick["matched"] is True:
+        # The quick tier is the whole point: one short guide, then read the files.
+        artifacts = {"guide"}
+        tier = "quick"
+    else:
+        artifacts = {a for k, v in classification.items()
+                     if v["matched"] is True for a in wants[k]}
+        artifacts.add("guide")  # floor: the default classification always gets a guide
+        tier = ("large" if True in (wide_behavioural["matched"], deep["matched"],
+                                     risky_cls["matched"]) else "standard")
 
     print(json.dumps({
         "range": args.range,
         "repo_path": str(Path(repo).resolve()),
         "signals": signals,
         "classification": classification,
+        "tier": tier,
+        "effort": EFFORT[tier],
         "artifacts": sorted(artifacts),
         "adjudicate": [k for k, v in classification.items() if v["matched"] == "undetermined"],
     }, indent=2))

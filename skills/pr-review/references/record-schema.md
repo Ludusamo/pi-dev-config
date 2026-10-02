@@ -20,6 +20,7 @@ The artifact root is `PR_REVIEW_ARTIFACT_ROOT`, defaulting to `~/notes/pr-review
   "head_sha": "9f8e7d6",
   "classification": ["narrow_behavioural", "deep_cut"],
   "verdict": "request changes",
+  "tier": "large",
 
   "files": 16,
   "hunks": 65,
@@ -39,6 +40,7 @@ The artifact root is `PR_REVIEW_ARTIFACT_ROOT`, defaulting to `~/notes/pr-review
     "fired": ["R-003"],
     "adopted": ["R-003"],
     "false_positives": ["R-016"],
+    "not_raised": ["R-011"],
     "not_reached": ["R-010"],
     "missed": ["R-015"]
   },
@@ -56,6 +58,11 @@ The artifact root is `PR_REVIEW_ARTIFACT_ROOT`, defaulting to `~/notes/pr-review
   "escaped_defects": []
 }
 ```
+
+`tier` comes from `classify.json` and is `quick`, `standard` or `large`.
+Records written before tiers existed have none, and the retro reports them as `legacy`.
+
+`classification` lists every class that matched: `quick`, `wide_mechanical`, `narrow_behavioural`, `wide_behavioural`, `deep_cut`, `risky_surface`.
 
 When there is no `scan.md`, `scan` records that instead of a set of empty lists, which would look the same as a scan that ran and found nothing:
 
@@ -75,6 +82,10 @@ These fields are what the retro actually computes on, and they are the ones most
 Two of these for the same rule is the trigger to set `Active: false`.
 Recording them is the only way a noisy rule ever gets removed, and a noisy rule is worse than no rule because it trains you to skim.
 
+**`scan.not_raised`** - rules that fired correctly but were not worth raising with the author.
+A rule that keeps landing here is right but not valuable: lower its severity or retire it.
+Older verdicts spelled this `agreed`; the parser maps it across with a warning.
+
 **`scan.missed`** - rules that should have fired and did not.
 Means the rule's `Applies when` is too narrow, or the check is unevaluable as written.
 
@@ -89,7 +100,7 @@ Include `notes` when the reviewer wrote in `notes.md` - it is scaffolded every t
 This is the field that makes reviews get *faster* rather than merely more thorough.
 `artifacts_used` is a required frontmatter key in `verdict.md`; `verdict_to_record.py` refuses to write a record until it holds a list.
 
-**`agent_points[].disposition`** - what the reviewer did with each point the second-opinion pass raised: `adopted`, `rejected - intended` (the author meant it), or `rejected - wrong` (the agent misread the code).
+**`agent_points[].disposition`** - what the reviewer did with each point the second-opinion pass raised: `adopted`, `rejected - intended` (the author meant it), `rejected - not worth raising` (real, but too small to bother with), or `rejected - wrong` (the agent misread the code).
 Mostly-rejected agent points, especially `rejected - wrong`, mean the second-opinion pass is noisy and should be tightened or used less.
 
 **`reviewer_notes`** - the reviewer's private feedback on the process and the artifacts, never posted.
@@ -105,6 +116,7 @@ Free text. Writing it down turns skipped depth into a decision rather than a lap
 
 **`escaped_defects`** - appended *later*, when a bug is traced back to a change you approved.
 Always empty at write time.
+Append with `retro.py escaped --repo <repo> --id <id> --note "..."`, which adds `{"date": ..., "note": ...}`.
 It is the only true measure of whether the process works, and the only field that requires going back to amend an old record.
 
 ## Who supplies what
@@ -113,13 +125,14 @@ The record is written by the agent but is not the agent's opinion.
 
 | Source               | Fields                                                       |
 | -------------------- | ------------------------------------------------------------ |
-| `classify.json`      | `classification`, `files`, `hunks`, `mechanical_ratio`       |
+| `classify.json`      | `classification`, `tier`, `files`, `hunks`, `mechanical_ratio` |
 | `review_worktree.py` | `id`, `repo`, `head_sha`, `passes` (count of `.state.json` passes) |
 | Mechanical           | `date`, `artifacts_generated` (which artifact files exist), `scan.ran` |
 | **The reviewer**     | `verdict`, every `points[].severity`, every `points[].text`, `scan.false_positives`, `scan.missed`, `artifacts_used`, `agent_points[].disposition`, `not_reviewed`, `reviewer_notes`, `wall_minutes` |
 
 `verdict_to_record.py` fills every non-reviewer field itself, from the files in the artifact directory.
 It omits a field, with a warning, when the source file is missing.
+`retro.py backfill --write` fills the same mechanical fields into older records that lack them, and never touches a reviewer field.
 
 Nothing in the reviewer row may be inferred.
 A severity the agent chose, or a `false_positives` list it decided on its own, corrupts the retro at the exact point the retro is supposed to be measuring the agent.

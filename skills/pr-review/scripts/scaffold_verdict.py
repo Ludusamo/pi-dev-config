@@ -102,8 +102,8 @@ def scan_section(rows, na):
         return ["<!-- No scan.md found, so the record will say the scan did not run. "
                 "If REVIEW_STANDARDS.md exists, the scan step was skipped; say so here. -->"]
     L = [
-        "<!-- Reviewer column: adopted | false positive | agreed | "
-        "checked, ok | not reached | missed -->",
+        "<!-- Reviewer column - fail: adopted | false positive | not raised; "
+        "pass: agreed | missed; deferred: checked, ok | not reached -->",
         "",
         "| Rule  | Scan said | Reviewer |",
         "| ----- | --------- | -------- |",
