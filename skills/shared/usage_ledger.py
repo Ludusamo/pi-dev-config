@@ -25,8 +25,13 @@ Usage:
 --metric names a metrics.json key (see METRICS), model_share:<provider/model>,
 or category_rate:<category> ($ per active hour, needs `categorize` on both reports).
 A per-metric =up/=down overrides --expect for that metric.
-  usage_ledger.py change set ID --status S [--note N]
-  usage_ledger.py change list [--open]
+  usage_ledger.py change set ID --status S [--note N] [--since WHEN]
+  usage_ledger.py change list [--open] [--json]
+
+`--since` (with --status applied) says when the change actually took effect, so
+a change marked late is judged against the last report before that point, not
+against reports that already include it. `done` is accepted for `applied`.
+The `/usage` command (extensions/usage-ledger.ts) wraps `change list/set`.
 
 Statuses: proposed -> applied -> kept | reverted, or dropped. A change is
 "open" while proposed or applied; open changes are listed in every new report
@@ -400,7 +405,7 @@ def changes_section(new_meta, new_dir):
             rows.append([label, fa, fb, exp or "-", against_expectation(a, b, exp)])
         if rows:
             out.append(table(["Metric", f"Baseline ({c.get('baseline_report')})", "Now", "Expected", "Result"], rows))
-        out.append("\nVerdict: TODO - keep, revert, or give it another window? Then `change set " + c["id"] + " --status ...`.\n")
+        out.append("\nVerdict: TODO - keep, revert, or give it another window? Record it with `/usage " + c["id"] + "`.\n")
     return "\n".join(out) + "\n"
 
 
@@ -556,6 +561,9 @@ def cmd_compare(args):
 def cmd_change(args):
     items = load_changes()
     if args.action == "list":
+        if args.json:
+            print(json.dumps([c for c in items if not args.open or c["status"] in OPEN_STATUSES]))
+            return
         for c in items:
             if args.open and c["status"] not in OPEN_STATUSES:
                 continue
@@ -587,16 +595,25 @@ def cmd_change(args):
         c = next((x for x in items if x["id"] == args.id), None)
         if not c:
             sys.exit(f"no change {args.id}")
-        if args.status not in STATUSES:
-            sys.exit(f"status must be one of {STATUSES}")
-        if args.status == "applied" and c["status"] == "proposed":
+        status = "applied" if args.status == "done" else args.status
+        if status not in STATUSES:
+            sys.exit(f"status must be one of {STATUSES} (or done = applied)")
+        if args.since and status != "applied":
+            sys.exit("--since only applies to --status applied")
+        if status == "applied" and (c["status"] == "proposed" or args.since):
             # The baseline for judging a change is the last report before it took effect.
-            base_dir, _ = latest()
-            c["baseline_report"] = base_dir.name if base_dir else c.get("baseline_report")
-        c["status"] = args.status
-        c["history"].append({"at": now_iso(), "status": args.status, "note": args.note})
+            since = args.since or now_iso()
+            base_dir, _ = previous_report(since, exclude=Path("/nonexistent"))
+            if base_dir is None:
+                sys.exit(f"no report ends at or before {since}; there is nothing to judge {c['id']} against")
+            c["baseline_report"] = base_dir.name
+            if args.since:
+                c["effective"] = since
+        c["status"] = status
+        c["history"].append({"at": now_iso(), "status": status, "note": args.note,
+                             **({"effective": args.since} if args.since else {})})
         save_changes(items)
-        print(f"{c['id']} -> {c['status']}")
+        print(f"{c['id']} -> {c['status']}" + (f" (baseline {c['baseline_report']})" if status == "applied" else ""))
 
 
 def main():
@@ -636,6 +653,8 @@ def main():
     p.add_argument("--status")
     p.add_argument("--note")
     p.add_argument("--open", action="store_true")
+    p.add_argument("--json", action="store_true", help="list: print the entries as JSON")
+    p.add_argument("--since", help="set --status applied: when it took effect (ISO time or YYYY-MM-DD)")
     p.set_defaults(fn=cmd_change)
 
     args = ap.parse_args()

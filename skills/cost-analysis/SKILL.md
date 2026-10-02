@@ -41,6 +41,12 @@ $L window                 # where the next report starts and ends - tell the use
 $L run                    # runs every extractor for that window, writes <root>/<date>/
 ```
 
+Before `run`, reconcile the changes log, because the user should not have to remember to mark things:
+
+- `$L change list --open`. For each `proposed` change, look for evidence that it was adopted: config changes (`~/.pi/agent/settings.json`, `AGENTS.md` files, `agents/`, extensions), git history of `~/.pi/agent`, or the behaviour itself in the new window's data.
+- If it was clearly adopted, mark it `$L change set <ID> --status applied --since <when it took effect> --note "<evidence>"`. `--since` matters: it picks the baseline report from before the change.
+- If it is a habit you cannot see in files (e.g. "compact at milestones"), ask the user with `ask_user` - one question per change, options "Yes, since <date>" / "Not yet" / "Drop it" - rather than guessing.
+
 `run` writes `data/` (cost, cost_sessions, sessions, exchanges, content, activity), `metrics.json` (comparable headline metrics), and a `report.md` skeleton.
 The skeleton already contains the headline table, the comparison with the previous report, and every open change from the changes log with its watched metrics before and after.
 Then:
@@ -58,6 +64,8 @@ Rules:
 - Windows are half-open `(after, before]` and clip *entries*, not files. A session that spans two reports is split between them.
 - Window lengths differ, so compare per-hour, per-turn, per-active-day and share metrics, not raw totals. `compare` marks totals with no direction for this reason.
 - Never hand-edit `changes.jsonl` or `CHANGES.md`; go through `change add` / `change set` so the baseline report is recorded.
+- Whenever you implement a logged change yourself, in any session (editing settings, adding an AGENTS.md rule, ...), mark it applied right then with `change set <ID> --status applied`.
+- The user marks changes with the `/usage` command (`/usage`, `/usage done C2`, `/usage keep C1`, `/usage check`). Point them to it rather than to the script.
 - If `run` says the window is empty, report that and stop.
 
 ## Step 1: Run the extractor (one-off analysis)

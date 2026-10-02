@@ -96,6 +96,14 @@ Read-only enforcement lives entirely in `agent-modes`' `tour` mode (blocked edit
 The `--session` flag matters here: without it, starting a tour would silently change the persisted default mode for every future session and project, not just this one.
 If the `agent-modes` extension isn't loaded (so `/mode` isn't available), `/tour start` warns the user instead of silently proceeding as if the walkthrough were read-only.
 
+### Usage changes log
+
+`usage-ledger.ts` adds `/usage`, for marking the recommendations from pi usage checks without knowing where the ledger script lives.
+`/usage` opens a picker: choose a change, then what happened (done, done since a date, keep, revert, drop) and an optional note.
+Shortcuts: `/usage done C2 [note]`, `/usage keep|revert|drop C1 [note]`, `/usage list [all]`, and `/usage check` to have the agent run a usage check now.
+It wraps `skills/shared/usage_ledger.py change list/set`; the log itself is `~/notes/pi-usage/changes.jsonl`.
+You rarely need it: the agent marks a change applied when it implements one, and each usage check first looks for evidence of proposed changes and asks about the ones it cannot see.
+
 ## Skills
 
 ### Project memory
