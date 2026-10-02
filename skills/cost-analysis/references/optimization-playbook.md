@@ -156,3 +156,15 @@ because each habit carries a price:
 - **Read `tool_mix_costs` as workflow shapes.** The expensive mixes are
   usually edit/build/retry loops. That points at a project-level fix (a faster
   test command, a pre-flight check in `AGENTS.md`) rather than a model change.
+
+## 9. Content cost (`content_costs.py`)
+
+Use it when the question is *what* in the context was expensive rather than *when*.
+
+- **Start with `by_category`.** Usually bash output, file content, and prior conversation dominate. Each points at a different fix: bounding command output, reading ranges, or splitting sessions.
+- **Files: look at `avg_turns_in_context` before size.** A file in context for 150 turns costs far more than a larger file read near the end. The fix is often to read it later, read a range, or start a fresh session after the work that needed it.
+- **Large `file/edit` / `file/write` rows** mean big edit payloads or whole-file rewrites. Prefer smaller targeted edits, and avoid rewriting long docs (ADRs, specs) repeatedly in one session.
+- **Comments.** Quote `comments.files_shown_to_model.by_class.comment` as a share and dollar figure, then name the top files. Options, cheapest first: read the code region instead of the whole file; move long design rationale out of source into docs that are read on demand; strip comments in a read wrapper. Keep comments that explain non-obvious intent - removing them can cost turns. If `files_written_by_agent` has a high comment share, an `AGENTS.md` line about comment density is the fix.
+- **Always-loaded prompt.** `always_loaded` rows are paid every turn. Large tool declarations for rarely used tools (check usage in `session-insights`), duplicated `AGENTS.md` files, and long skill descriptions are the targets. Even ~500 tokens per turn is noticeable across thousands of turns.
+- **Honesty.** Dollars reconcile to real spend, but shares within a turn are estimates; mention `meta.calibration` if the p10-p90 spread is wide, and label approximate (`approx_attributed_cost_usd`, disk-classified) figures.
+

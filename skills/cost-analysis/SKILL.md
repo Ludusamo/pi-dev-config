@@ -1,6 +1,6 @@
 ---
 name: cost-analysis
-description: Analyzes spend across pi.dev sessions (~/.pi/agent/sessions) to answer "where is my money going" and "how do I spend less for the same work" - cost by model/provider/project/day, cache efficiency, context-growth and tool-output carry cost, most expensive sessions, and counterfactual repricing against the model catalog. Use when the user asks what they are spending on models, why a session was expensive, whether to switch model or provider, how to cut token/API cost, or wants a cost report or budget breakdown.
+description: Analyzes spend across pi.dev sessions (~/.pi/agent/sessions) to answer "where is my money going" and "how do I spend less for the same work" - cost by model/provider/project/day, cache efficiency, context-growth and tool-output carry cost, most expensive sessions, per-file and per-comment context cost, and counterfactual repricing against the model catalog. Use when the user asks what they are spending on models, why a session was expensive, whether to switch model or provider, how to cut token/API cost, which files or comments are eating tokens, or wants a cost report or budget breakdown.
 ---
 
 # Cost Analysis
@@ -96,6 +96,43 @@ If the user wants the behavioral side in full (repeated phrasings, repeated
 commands, file churn), run `session-insights` too and merge the narratives:
 spend figures rank the findings, behavior explains them.
 
+## Step 2c: Attach the spend to content (optional)
+
+Use this when the question is *which content* filled the context window:
+which files, how much of them was comments, what the always-loaded prompt
+(AGENTS.md, skill descriptions, tool declarations) costs, or what bash
+output costs to carry.
+
+```bash
+python3 "$HOME/.pi/agent/skills/shared/content_costs.py" --scope all --out /tmp/content_costs.json
+```
+
+Flags: `--scope`/`--cwd`/`--since`/`--limit`/`--top` as above;
+`--path-glob GLOB` limits the file/directory/extension/comment views;
+`--thinking exclude` drops prior thinking blocks from context;
+`--chars-per-token F` (default 4).
+
+It rebuilds the context of every turn (branch path, compaction,
+`context_edit`, system-prompt replay), splits it into segments, and divides
+the turn's real input-side cost (input + cacheRead + cacheWrite) among them.
+New content takes the write cost and carried content takes the cache-read
+cost. Attributed dollars reconcile exactly to the real input-side spend.
+Output cost is reported but not attributed. Schema and caveats in
+`references/report-schema.md`; how to act on it in
+`references/optimization-playbook.md` section 9.
+
+Three guards on reading it:
+
+- Dollars are real, but the split *within* a turn uses estimated token
+  shares. Check `meta.calibration`: a narrow p10-p90 means the shares are
+  reliable even if the median is far from 1.
+- `approx_attributed_cost_usd` on a file and
+  `cost_classified_from_current_disk_copy_usd` in `comments` mark figures
+  based on multi-file bash commands or the file as it is on disk now. Quote
+  them as approximate.
+- `whatif_upper_bounds` are ceilings. Comments sometimes save turns by
+  explaining intent, so removing them is not free.
+
 ## Step 3: Report
 
 Structure the answer as:
@@ -106,7 +143,9 @@ Structure the answer as:
    shares. Call out anything surprising (one session dominating, an expensive
    component the user probably didn't know about).
 3. **Efficiency findings** - cache amortization, context growth, tool-output
-   carry cost, provider deltas. Each with the number that proves it.
+   carry cost, provider deltas, and (if Step 2c ran) the most expensive
+   files, comment share, and always-loaded prompt cost. Each with the number
+   that proves it.
 4. **Recommendations** - 3-6, each with estimated $ or % impact and the
    concrete change (settings.json edit, workflow habit, skill, model choice).
    Rank by impact, and be explicit when an estimate is soft.

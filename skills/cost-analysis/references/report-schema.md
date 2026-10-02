@@ -155,3 +155,91 @@ exchanges therefore cost more regardless of the request. `mean_position` /
 `position` (0 = session start, 1 = session end) is reported everywhere so the
 claim can be checked: expensive **and early** is about the request; expensive
 **and late** is usually about session length.
+
+---
+
+# Content Report Schema
+
+Output of `~/.pi/agent/skills/shared/content_costs.py`. Attributes each turn's real input-side cost (input + cacheRead + cacheWrite) to the content that filled the context window.
+
+Method, in short:
+For every assistant turn, the script rebuilds the context sent to the model (branch path, latest compaction, `context_edit`, system-message replay).
+It splits that context into **segments** (one file read, one AGENTS.md, one skill description, one tool declaration, one message block).
+Segments new since the previous turn on the branch take the write cost (input + cacheWrite), capped at their scaled size.
+Carried segments take the cacheRead cost plus any leftover write cost (cache misses).
+Estimated token counts decide shares only within a turn, so dollars reconcile to actual spend.
+
+## `meta`
+
+`sessions`, `assistant_turns`, `chars_per_token`, `thinking_in_context`, `classifier` (`pygments` or `regex-fallback`), `path_glob`.
+`calibration` holds `median`, `p10`, `p90` of actual context tokens / estimated tokens per paid turn.
+A narrow spread means the segment model tracks what was sent, so shares are reliable.
+A median well above 1 (around 1.7 is normal) means chars/4 undercounts and message framing is unmodeled; it rescales token counts but not shares.
+
+## `totals`
+
+`input_side_cost_usd`, `attributed_cost_usd` (should equal it), `unattributed_cost_usd` (should be ~0), `output_cost_usd_not_attributed`.
+Generated output is not attributed; once it is in context its carry cost shows up under `conversation/*`.
+
+## Common row fields
+
+Every ranked row has `cost_usd`, `share_of_input_side`, `first_send_cost_usd`, `carry_cost_usd`, `est_tokens_sent`, `est_token_turns` (tokens x turns in context), `segments`, `sessions`.
+`carry_cost_usd` far above `first_send_cost_usd` means the content was cheap to send but sat in context for a long time.
+
+## `by_category`, `top_labels`
+
+Categories:
+
+| Category                           | Content                                                      |
+|------------------------------------|--------------------------------------------------------------|
+| `file/read`                        | `read` tool results, keyed by path                           |
+| `file/bash`                        | Part of a bash result attributed to a file it printed        |
+| `file/edit`, `file/write`          | File content sent by the agent in edit/write call arguments  |
+| `bash`                             | Other bash output; label = first command name (`git`, `rg`)  |
+| `toolcall`, `tool`, `tool_error`   | Other tool call arguments, results, and failed results       |
+| `conversation/*`                   | User text, assistant text, prior thinking, user `!` commands |
+| `system/tool_decl`                 | One tool's JSON declaration                                  |
+| `system/agents_md`                 | One `<project_instructions>` file                            |
+| `system/skill`                     | One skill's `<skill>` description block                      |
+| `system/section`                   | Remaining prompt sections (`rules`, `docs`, `tools`, ...)    |
+| `custom`, `compaction/*`, `edited` | Extension messages, summaries, context-edit replacements     |
+
+`top_labels` ranks `[category, label]` pairs.
+
+## `always_loaded`
+
+The `system/*` rows with `avg_est_tokens_per_turn`.
+These are paid on every turn of every session, so a small per-turn size still adds up.
+
+## `files`
+
+Per path: common fields plus `reads_by_kind` (read/bash/edit/write counts), `avg_turns_in_context`, `cost_by_content_class` (`content`, `comment`, `docstring`, `blank`, `license`, `unclassified`), `comment_cost_usd` (comment + docstring + license), `approx_attributed_cost_usd`, `redundant_reads`, `redundant_read_cost_usd`, `projects`.
+`approx_attributed_cost_usd` is the part from multi-file bash commands, where output was split across files by current on-disk size.
+
+## `directories`, `extensions`
+
+Same rows grouped by parent directory and file extension.
+These and `files`/`comments` respect `--path-glob`.
+
+## `comments`
+
+- `files_shown_to_model` - comment-class mix of read and bash file content, with `cost_classified_from_current_disk_copy_usd` (the part classified from the file as it is now rather than the logged text).
+- `files_written_by_agent` - the same mix for edit/write arguments. A high comment share here points at the agent's writing style, not the codebase.
+- `top_files_by_comment_cost` - `path`, `comment_cost_usd`, `cost_usd`, `comment_share`.
+
+Classification is by weighted characters (whitespace runs collapsed) per line via pygments; a top-of-file comment block mentioning copyright/license/SPDX is `license`.
+
+## `redundant_reads`
+
+Files re-read with the same range while the earlier copy was still in context and the file had not been edited in between.
+
+## `whatif_upper_bounds`
+
+`strip_comments_docstrings_from_reads_usd`, `strip_license_headers_from_reads_usd`, `avoid_redundant_rereads_usd`.
+Ceilings holding everything else fixed.
+
+## Caveats
+
+- Bash file attribution parses the command string (`cat`, `sed`, `head`, `tail`, `nl`, `bat`, `git show REV:path`, with `cd` tracking). Files printed by scripts or other commands stay under `bash`.
+- Assumes prefix caching: carried content is served from cache, new content is written.
+- Images are counted at a flat 1500 tokens.
