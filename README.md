@@ -17,6 +17,10 @@ Tour mode also blocks edits and git writes, and is meant to be paired with the `
 
 In coordinator mode, the extension also renders a live status widget tracking delegated subagent tasks (running/done/failed, with elapsed time), built on the same tool-call data the `subagent` extension's session store uses.
 
+Pi-runtime subagents (`PI_SUBAGENT=1`) never adopt the persisted mode, which would block a worker's edits under pair, tour or coordinator.
+They run in a dedicated subagent mode instead: edits are allowed (each agent's `tools:` list decides what it can touch), and git writes are allowed only when the dispatching session is in auto or coordinator mode, otherwise blocked, since a subagent has no UI to confirm with.
+The parent passes its mode to children through `PI_PARENT_AGENT_MODE`.
+
 ### Ask user
 
 The `ask-user` extension registers an `ask_user` tool that lets the LLM ask the user a clarifying question instead of guessing, optionally offering candidate answers alongside free-text input.
@@ -36,6 +40,19 @@ Agents are markdown files with YAML frontmatter, discovered from `~/.pi/agent/ag
 
 It supports several dispatch modes: single (one-shot), parallel (concurrent one-shot tasks), chain (sequential one-shot tasks that pass results forward), and a persistent open/send/close flow for multi-turn work against the same accumulated context, such as an iterative code review.
 Each invocation spawns a short-lived child process; persistence across open/send calls comes from the underlying CLI's own session/resume mechanism, not a long-running daemon.
+
+Subagent runs use `--no-session`, so their turns never appear in a session file.
+Their cost is only recorded in the parent's `subagent` tool result, and the cost-analysis extractors read it from there (`subagents` in their report).
+
+Four user-scope agents live in `agents/`.
+Models were picked by benchmarking candidates on tasks with known answers (2026-10-02, details in `~/notes/pi-usage/agent-bench-2026-10-02.md`):
+
+| Agent    | Model                                | Tools                    | Why                                                                                               |
+|----------|--------------------------------------|--------------------------|---------------------------------------------------------------------------------------------------|
+| scout    | `openai/gpt-5.6-luna:low`            | read-only + memory read  | Full marks on both lookup tasks at $0.006-0.018, 4-13x cheaper than Sonnet 5.5 for the same answers |
+| planner  | `openai/gpt-5.6-sol:high`            | read-only + memory read  | Matched Opus 5.5 and Fable 5.1 (found a prior ADR that rejected the feature) at 57% / 26% of their cost |
+| worker   | `anthropic/claude-sonnet-5.5:medium` | read/edit/write/bash     | Passed every hidden test on both tasks and flagged a subtle float-ordering change; about 40% of Opus's cost |
+| reviewer | `anthropic/claude-opus-5.5:high`     | read-only + memory read  | Only model to catch all three real issues on a 2,800-line change; expensive there (about $3)        |
 
 ### Project memory
 
