@@ -280,6 +280,45 @@ def reprice(tokens, price):
     return sum(tokens.get(k, 0) * price.get(k, 0.0) for k in COST_COMPONENTS) / 1e6
 
 
+# ---------------------------------------------------------------- subagents
+#
+# Subagents run in child processes with --no-session, so their turns never
+# appear in any session file. Their provider-reported cost is only recorded in
+# the parent's `subagent` tool result, under `details`:
+#   kind "run"     -> results[]: {agent, model, usage: {cost, turns, ...}}  one-shot
+#   kind "session" -> session: {handle, agent, model, usage}  open/send, CUMULATIVE
+#                     per handle, so only the increase since the last sighting counts.
+
+def subagent_runs(entries):
+    """-> [{agent, model, cost, turns, timestamp_ms}] for every billed subagent run in a session."""
+    out, last = [], {}
+    for e in entries:
+        if e.get("type") != "message":
+            continue
+        m = e.get("message") or {}
+        if m.get("role") != "toolResult" or m.get("toolName") != "subagent":
+            continue
+        d = m.get("details") or {}
+        ms = to_epoch_ms(e.get("timestamp"))
+        if d.get("kind") == "run":
+            for r in d.get("results") or []:
+                u = r.get("usage") or {}
+                out.append({"agent": r.get("agent") or "unknown", "model": r.get("model") or "unknown",
+                            "cost": float(u.get("cost") or 0.0), "turns": int(u.get("turns") or 0),
+                            "timestamp_ms": ms})
+        elif d.get("kind") == "session":
+            s = d.get("session") or {}
+            u = s.get("usage") or {}
+            h = s.get("handle") or s.get("agent")
+            cost, turns = float(u.get("cost") or 0.0), int(u.get("turns") or 0)
+            pc, pt = last.get(h, (0.0, 0))
+            last[h] = (cost, turns)
+            if cost > pc or turns > pt:
+                out.append({"agent": s.get("agent") or "unknown", "model": s.get("model") or "unknown",
+                            "cost": max(cost - pc, 0.0), "turns": max(turns - pt, 0), "timestamp_ms": ms})
+    return [r for r in out if r["cost"] or r["turns"]]
+
+
 # ---------------------------------------------------------------- exchanges
 
 def turn_usage(msg):

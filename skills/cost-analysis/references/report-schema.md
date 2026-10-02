@@ -258,3 +258,15 @@ One per report dir under `~/notes/pi-usage/<date>/`.
 | `categories` | `{category: {sessions, active_hours, cost_usd}}`, filled by `usage_ledger.py categorize` |
 
 `changes.jsonl` (one JSON object per line) holds `id`, `title`, `detail`, `metrics` (keys, optionally `=up`/`=down`), `expect`, `status` (proposed, applied, kept, reverted, dropped), `baseline_report` (the latest report when the change was applied), and `history`.
+
+## `subagents` (extract_costs.py)
+
+Subagents run with `--no-session`, so their turns are in no session file; their provider-reported cost is read from the parent's `subagent` tool results (`details.results[].usage` for one-shot runs, cumulative `details.session.usage` deltas per handle for open/send).
+
+| Field | Meaning |
+|---|---|
+| `cost_usd` / `runs` / `turns` | child-process spend in the window - NOT included in `totals.cost_usd` |
+| `by_agent` | per agent: runs, turns, cost, average cost per run, models used |
+
+`totals.cost_usd_including_subagents` is the whole bill. Per-session rows carry the same under `subagents`.
+The ledger's `cost_usd` and per-hour/per-day metrics use the including-subagents figure; `cost_per_turn` stays main-session only.

@@ -79,6 +79,10 @@ def extract_session(path: Path, keep_turn_series: bool, after_ms=None, before_ms
     if header is None:
         return None
     windowed = after_ms is not None or before_ms is not None
+    # From the full history: open/send costs are cumulative per handle, so the
+    # delta for an in-window send needs the sightings before the window.
+    sub_runs = [r for r in ps.subagent_runs(entries)
+                if ps.in_window(r["timestamp_ms"], after_ms, before_ms)]
     if windowed:
         entries = ps.clip_entries(entries, after_ms, before_ms)
         if not any(e.get("type") == "message" for e in entries):
@@ -225,6 +229,13 @@ def extract_session(path: Path, keep_turn_series: bool, after_ms=None, before_ms
             for k, v in per_model.items()
         },
         "_tool_results": tool_results,  # consumed by the aggregator, stripped afterwards
+        # Spend in child processes (--no-session), NOT included in cost_usd above.
+        "subagents": {
+            "cost_usd": round(sum(r["cost"] for r in sub_runs), 6),
+            "runs": len(sub_runs),
+            "turns": sum(r["turns"] for r in sub_runs),
+        },
+        "_subagent_runs": sub_runs,
     }
     if keep_turn_series:
         out["turn_series"] = turn_series
@@ -259,8 +270,15 @@ def build_report(sessions, prices, by_id, top_n, reprice_patterns):
     by_day = collections.defaultdict(lambda: {"cost": 0.0, "turns": 0, "tokens": collections.Counter(), "sessions": set()})
     tool_attr = collections.defaultdict(lambda: {"results": 0, "chars": 0, "est_tokens": 0, "carry_tokens": 0, "errors": 0})
     first_ms = last_ms = None
+    sub_by = collections.defaultdict(lambda: {"runs": 0, "turns": 0, "cost": 0.0, "models": collections.Counter()})
 
     for s in sessions:
+        for r in s.get("_subagent_runs", []):
+            b = sub_by[r["agent"]]
+            b["runs"] += 1
+            b["turns"] += r["turns"]
+            b["cost"] += r["cost"]
+            b["models"][r["model"]] += 1
         total_cost += s["cost_usd"]
         total_turns += s["turns"]
         paid_turns += s["paid_turns"]
@@ -367,6 +385,7 @@ def build_report(sessions, prices, by_id, top_n, reprice_patterns):
         },
         "totals": {
             "cost_usd": round(total_cost, 4),
+            "cost_usd_including_subagents": round(total_cost + sum(b["cost"] for b in sub_by.values()), 4),
             "turns": total_turns,
             "paid_turns": paid_turns,
             "free_turns": free_turns,
@@ -384,6 +403,18 @@ def build_report(sessions, prices, by_id, top_n, reprice_patterns):
             },
         },
         "by_model": models,
+        "subagents": {
+            "note": "Child-process spend from subagent tool results. Not in totals.cost_usd; "
+                    "see totals.cost_usd_including_subagents.",
+            "cost_usd": round(sum(b["cost"] for b in sub_by.values()), 4),
+            "runs": sum(b["runs"] for b in sub_by.values()),
+            "turns": sum(b["turns"] for b in sub_by.values()),
+            "by_agent": sorted(({
+                "agent": a, "runs": b["runs"], "turns": b["turns"], "cost_usd": round(b["cost"], 4),
+                "avg_cost_per_run": round(b["cost"] / b["runs"], 4) if b["runs"] else 0.0,
+                "models": dict(b["models"]),
+            } for a, b in sub_by.items()), key=lambda r: r["cost_usd"], reverse=True),
+        },
         "by_project": sorted(
             ({
                 "cwd": k,
@@ -505,6 +536,7 @@ def main():
 
     for s in sessions:
         s.pop("_tool_results", None)
+        s.pop("_subagent_runs", None)
     if not args.no_per_session:
         report["sessions"] = sorted(sessions, key=lambda s: s["started"] or "")
 

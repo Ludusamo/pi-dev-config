@@ -81,6 +81,9 @@ data when you need to explain *why* one specific session was expensive.
 
 Field-by-field meanings are in `references/report-schema.md`.
 
+Subagent spend is separate: `totals.cost_usd` is main sessions only, `subagents` is the child-process spend, and `totals.cost_usd_including_subagents` is the whole bill.
+Report the whole bill, and when work moved into subagents, say how much (`subagents.by_agent`) rather than letting lower main-session numbers read as savings.
+
 ## Step 2: Interpret
 
 Read `references/optimization-playbook.md`. It covers, in rough order of

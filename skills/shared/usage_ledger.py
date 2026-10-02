@@ -64,7 +64,9 @@ STATUSES = OPEN_STATUSES + ("kept", "reverted", "dropped")
 # metric -> (label, which direction is better, format). Window-length-dependent
 # totals are marked "-": compare them per hour/turn/day instead.
 METRICS = {
-    "cost_usd": ("Total spend", "-", "${:.2f}"),
+    "cost_usd": ("Total spend (incl. subagents)", "-", "${:.2f}"),
+    "subagent_cost_usd": ("Subagent spend", "-", "${:.2f}"),
+    "subagent_share": ("Subagent share of spend", "-", "{:.0%}"),
     "days": ("Days in window", "-", "{:.1f}"),
     "active_days": ("Days with activity", "-", "{:d}"),
     "sessions": ("Sessions", "-", "{:d}"),
@@ -72,7 +74,7 @@ METRICS = {
     "active_hours": ("Active hours", "-", "{:.1f}"),
     "cost_per_active_day": ("$ per active day", "down", "${:.2f}"),
     "cost_per_active_hour": ("$ per active hour", "down", "${:.2f}"),
-    "cost_per_turn": ("$ per turn", "down", "${:.4f}"),
+    "cost_per_turn": ("Main-session $ per turn", "down", "${:.4f}"),
     "cost_per_session": ("$ per session", "down", "${:.2f}"),
     "median_exchange_cost": ("Median $ per request", "down", "${:.3f}"),
     "share_cache_read": ("Cache-read share of spend", "down", "{:.0%}"),
@@ -198,7 +200,11 @@ def activity_text(rows):
 def compute_metrics(cost, cost_sessions, exchanges, act, after, before):
     t = cost["totals"]
     turns = t["turns"] or 0
-    total = t["cost_usd"] or 0.0
+    main = t["cost_usd"] or 0.0
+    # Subagents run --no-session, so their spend lives only in the parent's tool
+    # results. Whole-spend rates include it, or delegating would look like saving.
+    total = t.get("cost_usd_including_subagents", main) or 0.0
+    sub = (cost.get("subagents") or {}).get("cost_usd", 0.0)
     active_h = sum(r["active_minutes"] for r in act) / 60
     active_days = len({(r["start"] or "")[:10] for r in act if r["start"]})
     first = after or cost["meta"].get("first_activity")
@@ -214,6 +220,8 @@ def compute_metrics(cost, cost_sessions, exchanges, act, after, before):
 
     m = {
         "cost_usd": round(total, 4),
+        "subagent_cost_usd": round(sub, 4),
+        "subagent_share": div(sub, total),
         "days": round(days, 2) if days is not None else None,
         "active_days": active_days,
         "sessions": cost["meta"]["sessions_analyzed"],
@@ -221,7 +229,7 @@ def compute_metrics(cost, cost_sessions, exchanges, act, after, before):
         "active_hours": round(active_h, 2),
         "cost_per_active_day": div(total, active_days),
         "cost_per_active_hour": div(total, active_h),
-        "cost_per_turn": div(total, turns),
+        "cost_per_turn": div(main, turns),
         "cost_per_session": t.get("avg_cost_per_session"),
         "median_exchange_cost": exchanges["totals"].get("median_cost_per_exchange"),
         "share_cache_read": shares.get("cacheRead"),
