@@ -88,6 +88,10 @@ METRICS = {
     "bash_carry_per_turn": ("Est. bash carry $ per turn", "down", "${:.4f}"),
     "read_carry_cost_usd": ("Est. read output carry $", "down", "${:.2f}"),
     "read_carry_per_turn": ("Est. read carry $ per turn", "down", "${:.4f}"),
+    # Size of each result, independent of how long sessions run - isolates
+    # "smaller outputs" from "shorter sessions", which both cut carry cost.
+    "bash_avg_result_tokens": ("Avg bash result size (tokens)", "down", "{:,d}"),
+    "read_avg_result_tokens": ("Avg read result size (tokens)", "down", "{:,d}"),
     "error_exchange_share": ("Spend in requests with tool errors", "down", "{:.0%}"),
 }
 
@@ -234,6 +238,8 @@ def compute_metrics(cost, cost_sessions, exchanges, act, after, before):
         "bash_carry_per_turn": div((tools.get("bash") or {}).get("est_carry_cost_usd", 0.0), turns),
         "read_carry_cost_usd": (tools.get("read") or {}).get("est_carry_cost_usd", 0.0),
         "read_carry_per_turn": div((tools.get("read") or {}).get("est_carry_cost_usd", 0.0), turns),
+        "bash_avg_result_tokens": (tools.get("bash") or {}).get("avg_result_tokens"),
+        "read_avg_result_tokens": (tools.get("read") or {}).get("avg_result_tokens"),
         "error_exchange_share": exchanges.get("error_costs", {}).get("share_of_spend"),
     }
     model_share = {r["model"]: r["share_of_spend"] for r in cost.get("by_model", [])}
