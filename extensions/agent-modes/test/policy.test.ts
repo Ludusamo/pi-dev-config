@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_MODE, getModePolicy, MODES, parseModeArgs, SESSION_ONLY_FLAG, TOUR_MODE_NAME } from "../policy.ts";
+import {
+  DEFAULT_MODE,
+  getModePolicy,
+  MODES,
+  parseModeArgs,
+  SESSION_ONLY_FLAG,
+  subagentMode,
+  TOUR_MODE_NAME,
+} from "../policy.ts";
 
 test("MODES has a policy for every built-in mode name", () => {
   for (const name of ["pair", "guarded", "auto", "coordinator", "tour"]) {
@@ -66,4 +74,26 @@ test("parseModeArgs rejects an unknown flag even alongside the real flag", () =>
 
 test("parseModeArgs does not error on the real flag", () => {
   assert.equal(parseModeArgs(`tour ${SESSION_ONLY_FLAG}`).error, undefined);
+});
+
+test("subagentMode never blocks edits, whatever the dispatcher's mode", () => {
+  for (const parent of [...Object.keys(MODES), undefined, "bogus"]) {
+    assert.equal(subagentMode(parent).editPolicy, "unrestricted", `parent ${parent}`);
+  }
+});
+
+test("subagentMode allows git writes only under auto and coordinator dispatchers", () => {
+  assert.equal(subagentMode("auto").gitWritePolicy, "unrestricted");
+  assert.equal(subagentMode("coordinator").gitWritePolicy, "unrestricted");
+  for (const parent of ["pair", "guarded", "tour", undefined, "bogus"]) {
+    assert.equal(subagentMode(parent).gitWritePolicy, "blocked", `parent ${parent}`);
+  }
+});
+
+test("subagentMode never needs confirmation, since a subagent has no UI to approve it", () => {
+  for (const parent of Object.keys(MODES)) {
+    const m = subagentMode(parent);
+    assert.notEqual(m.editPolicy, "confirm");
+    assert.notEqual(m.gitWritePolicy, "confirm");
+  }
 });

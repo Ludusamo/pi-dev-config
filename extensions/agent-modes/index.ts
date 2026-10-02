@@ -5,7 +5,19 @@ import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { discoverAgents } from "../subagent/agents.ts";
-import { COORDINATOR_BASE_SNIPPET, DEFAULT_MODE, MODES, parseModeArgs, SESSION_ONLY_FLAG, type AgentMode } from "./policy.ts";
+import {
+  COORDINATOR_BASE_SNIPPET,
+  DEFAULT_MODE,
+  MODES,
+  PARENT_MODE_ENV,
+  parseModeArgs,
+  SESSION_ONLY_FLAG,
+  subagentMode,
+  type AgentMode,
+} from "./policy.ts";
+
+// Spawned as a subagent by the subagent extension (which sets PI_SUBAGENT=1 on the child).
+const IS_SUBAGENT = process.env.PI_SUBAGENT === "1";
 
 function isQwen3(model: Model | undefined): boolean {
   if (!model) return false;
@@ -271,6 +283,9 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     currentMode = mode;
+    // Children spawned by the subagent extension inherit process.env, so this tells them
+    // which mode they were dispatched from (see subagentMode in policy.ts).
+    process.env[PARENT_MODE_ENV] = mode.name;
     if (opts?.persist ?? true) await saveLastMode(name);
     updateStatus(ctx);
     updateDelegationWidget(ctx);
@@ -278,10 +293,18 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    const name = await loadLastMode();
-    currentMode = MODES[name];
     delegatedTasks = [];
     stopWidgetTicker();
+    if (IS_SUBAGENT) {
+      // Never adopt the persisted mode: it is the user's mode for their own sessions, and
+      // it would block a worker's edits. Derive a subagent policy from the dispatcher instead.
+      currentMode = subagentMode(process.env[PARENT_MODE_ENV]);
+      updateStatus(ctx);
+      return;
+    }
+    const name = await loadLastMode();
+    currentMode = MODES[name];
+    process.env[PARENT_MODE_ENV] = currentMode.name;
 
     if (isQwen3(ctx.model) && currentMode.name !== "coordinator") {
       modeBeforeAutoSwitch = currentMode.name;
@@ -323,6 +346,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("model_select", async (event, ctx) => {
+    if (IS_SUBAGENT) return; // a subagent's mode is fixed by its dispatcher
     if (isQwen3(event.model)) {
       if (currentMode.name !== "coordinator") {
         modeBeforeAutoSwitch = currentMode.name;

@@ -130,6 +130,46 @@ export const MODES: Record<string, AgentMode> = {
 
 export const DEFAULT_MODE = "pair";
 
+/**
+ * Env var the parent pi process sets to its current mode, so spawned subagents (which
+ * inherit the parent's environment) know what they were dispatched from. Set by index.ts.
+ */
+export const PARENT_MODE_ENV = "PI_PARENT_AGENT_MODE";
+
+/** Parent modes whose subagents may run git write commands (coordinator relies on it). */
+const SUBAGENT_GIT_WRITE_PARENTS = new Set(["auto", "coordinator"]);
+
+/**
+ * The mode a pi-runtime subagent (PI_SUBAGENT=1) runs in, derived from the parent's mode.
+ *
+ * Subagents must not inherit the parent's mode as-is: coordinator, pair and tour block
+ * edits, so a worker dispatched from them could not do its job - and coordinator mode exists
+ * precisely to hand edits to subagents. Edits are therefore unrestricted; what a subagent can
+ * touch is decided by its agent definition's `tools:` list. Git writes are allowed only when
+ * the parent itself would allow them without asking (auto) or delegates them by design
+ * (coordinator). Otherwise they are blocked outright: a subagent has no UI, so "confirm"
+ * could never be approved, and pair/tour mean the user has not handed over commits.
+ */
+export function subagentMode(parentMode: string | undefined): AgentMode {
+  const parent = parentMode && MODES[parentMode] ? parentMode : DEFAULT_MODE;
+  const gitWrites = SUBAGENT_GIT_WRITE_PARENTS.has(parent);
+  return {
+    name: "subagent",
+    label: "Subagent",
+    description: `Delegated task runner (dispatched from ${MODES[parent].label} mode).`,
+    editPolicy: "unrestricted",
+    gitWritePolicy: gitWrites ? "unrestricted" : "blocked",
+    systemPromptSnippet:
+      "You are running as a delegated SUBAGENT: another agent gave you this task and will read " +
+      "your final reply. Nobody can answer questions mid-task. Complete the task as given; if it " +
+      "is ambiguous or blocked, stop and state what you need in your final reply instead of " +
+      "guessing. " +
+      (gitWrites
+        ? "Commit only if the task asks you to."
+        : "Git write commands (commit/push/merge/rebase) are blocked; leave changes uncommitted."),
+  };
+}
+
 /** Name of the read-only tour mode, exported so other extensions (codebase-tour) don't have to hardcode it. */
 export const TOUR_MODE_NAME = "tour";
 
