@@ -10,6 +10,7 @@ paying for?".
 
 Usage:
   content_costs.py [--scope all|project] [--cwd PATH] [--since DAYS] [--limit N]
+                   [--after WHEN] [--before WHEN]
                    [--top N] [--chars-per-token F] [--thinking include|exclude]
                    [--path-glob GLOB] [--out PATH]
 
@@ -543,7 +544,10 @@ def is_system(entry):
 # per-session allocation
 # --------------------------------------------------------------------------
 
-def analyze_session(path, cpt, include_thinking, stats, calib):
+def analyze_session(path, cpt, include_thinking, stats, calib, after_ms=None, before_ms=None):
+    """after_ms/before_ms limit which turns are *priced*. Context is still rebuilt
+    from the full history, because an in-window turn carries out-of-window
+    content - clipping the entries would drop exactly what it paid to carry."""
     header, entries = ps.read_session(path)
     if header is None:
         return None
@@ -576,7 +580,12 @@ def analyze_session(path, cpt, include_thinking, stats, calib):
         m = e.get("message") or {}
         if not (e.get("type") == "message" and m.get("role") == "assistant"):
             continue
-        turns += 1
+        priced = ps.in_window(ps.to_epoch_ms(e.get("timestamp")), after_ms, before_ms)
+        if not priced and before_ms is not None and \
+                (ps.to_epoch_ms(e.get("timestamp")) or 0) > before_ms:
+            break  # past the window; nothing later can be priced
+        if priced:
+            turns += 1
         usage = m.get("usage") or {}
         cost = usage.get("cost") or {}
         tok_in = int(usage.get("input") or 0)
@@ -585,8 +594,11 @@ def analyze_session(path, cpt, include_thinking, stats, calib):
         c_in = float(cost.get("input") or 0.0)
         c_cr = float(cost.get("cacheRead") or 0.0)
         c_cw = float(cost.get("cacheWrite") or 0.0)
+        if not priced:
+            c_in = c_cr = c_cw = 0.0  # still walk the turn so keysets stay right
         session_cost["input_side"] += c_in + c_cr + c_cw
-        session_cost["output"] += float(cost.get("output") or 0.0)
+        if priced:
+            session_cost["output"] += float(cost.get("output") or 0.0)
 
         # ---- 1. rebuild the context for this request ------------------------
         path_entries, cur = [], byid.get(e.get("parentId"))
@@ -645,6 +657,8 @@ def analyze_session(path, cpt, include_thinking, stats, calib):
         scale = ctx_actual / sum_est if sum_est and ctx_actual else 1.0
         if sum_est and ctx_actual and (c_in + c_cr + c_cw) > 0:
             calib.append(scale)
+        if not priced:
+            continue
 
         # ---- 3. allocate actual cost ----------------------------------------
         write_cost, write_tok = c_in + c_cw, tok_in + tok_cw
@@ -903,18 +917,23 @@ def main():
                     help="whether prior-turn thinking blocks count as context (default include)")
     ap.add_argument("--path-glob", help="restrict file/dir/extension/comment views to paths matching GLOB")
     ap.add_argument("--out")
+    ps.add_window_args(ap)
     args = ap.parse_args()
+    after_ms, before_ms = ps.window_from_args(args)
 
     stats = collections.defaultdict(lambda: {"first_cost": 0.0, "carry_cost": 0.0, "tokens": 0.0,
                                              "token_turns": 0.0, "turns": 0, "meta": None})
     calib, sessions = [], []
     include_thinking = args.thinking == "include"
-    for path in ps.iter_session_files(args.scope, args.cwd, since=args.since, limit=args.limit):
-        r = analyze_session(path, args.chars_per_token, include_thinking, stats, calib)
-        if r:
+    for path in ps.iter_session_files(args.scope, args.cwd, since=args.since, limit=args.limit,
+                                      after_ms=after_ms):
+        r = analyze_session(path, args.chars_per_token, include_thinking, stats, calib,
+                            after_ms, before_ms)
+        if r and r["turns"]:
             sessions.append(r)
     report = summarize(stats, sessions, calib, args.top, args.path_glob,
                        args.chars_per_token, include_thinking)
+    report["meta"]["window"] = ps.window_meta(after_ms, before_ms)
     text = json.dumps(report, indent=2)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")

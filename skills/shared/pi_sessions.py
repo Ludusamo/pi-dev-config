@@ -37,11 +37,14 @@ def cwd_to_dirname(cwd: str) -> str:
     return "--" + cwd.strip("/").replace("/", "-") + "--"
 
 
-def iter_session_files(scope: str, cwd: str, since=None, limit=None, root: Path = None):
+def iter_session_files(scope: str, cwd: str, since=None, limit=None, root: Path = None,
+                       after_ms=None):
     """Session files for a scope, oldest-modified first.
 
     scope="all" spans every project; scope="project" matches one cwd.
     since = only files modified within N days; limit = keep N most recent.
+    after_ms = skip files last modified before this instant (they cannot hold
+    any entry inside a window that starts there).
     """
     root = root or SESSIONS_ROOT
     if not root.exists():
@@ -54,6 +57,8 @@ def iter_session_files(scope: str, cwd: str, since=None, limit=None, root: Path 
     if since is not None:
         cutoff = time.time() - since * 86400
         files = [f for f in files if f.stat().st_mtime >= cutoff]
+    if after_ms is not None:
+        files = [f for f in files if f.stat().st_mtime * 1000 >= after_ms]
     files.sort(key=lambda f: f.stat().st_mtime)
     if limit:
         files = files[-limit:]
@@ -101,6 +106,79 @@ def iso(ms):
     if ms is None:
         return None
     return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).isoformat(timespec="seconds")
+
+
+# ------------------------------------------------------------------ windows
+#
+# A window is a half-open interval (after, before] of entry timestamps, so
+# consecutive reports that pass the previous report's `before` as the next
+# `after` never count an entry twice. Windows clip *entries*, not files: a
+# session that spans two reports has its early turns in the first and its
+# late turns in the second.
+
+def parse_when(s):
+    """ISO timestamp or YYYY-MM-DD (UTC midnight) -> epoch ms. None passes through."""
+    if s is None or s == "":
+        return None
+    s = str(s).strip()
+    if len(s) == 10:
+        s += "T00:00:00+00:00"
+    d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)
+    return int(d.timestamp() * 1000)
+
+
+def add_window_args(ap):
+    ap.add_argument("--after", help="only entries strictly after this ISO time / YYYY-MM-DD")
+    ap.add_argument("--before", help="only entries at or before this ISO time / YYYY-MM-DD")
+
+
+def window_from_args(args):
+    """-> (after_ms, before_ms); either may be None."""
+    return parse_when(getattr(args, "after", None)), parse_when(getattr(args, "before", None))
+
+
+def in_window(ms, after_ms=None, before_ms=None):
+    if ms is None:
+        return True
+    if after_ms is not None and ms <= after_ms:
+        return False
+    if before_ms is not None and ms > before_ms:
+        return False
+    return True
+
+
+def clip_entries(entries, after_ms=None, before_ms=None):
+    """Drop entries timestamped outside the window. Untimestamped entries are kept."""
+    if after_ms is None and before_ms is None:
+        return entries
+    return [e for e in entries if in_window(to_epoch_ms(e.get("timestamp")), after_ms, before_ms)]
+
+
+def window_meta(after_ms, before_ms):
+    return {"after": iso(after_ms), "before": iso(before_ms)}
+
+
+IDLE_CAP_SECONDS = 300
+
+
+def active_seconds(entries, idle_cap=IDLE_CAP_SECONDS):
+    """Time actually spent in a session: the sum of gaps between consecutive
+    timestamped entries, each gap capped at idle_cap. Wall-clock duration is
+    useless for sessions left open overnight; this is not."""
+    stamps = sorted(ms for ms in (to_epoch_ms(e.get("timestamp")) for e in entries) if ms)
+    return sum(min((b - a) / 1000, idle_cap) for a, b in zip(stamps, stamps[1:]))
+
+
+def bash_program(cmd):
+    """First real program in a shell command, skipping leading `cd <dir> &&`
+    (agents prefix almost every command with it, so otherwise everything is "cd")."""
+    body = (cmd or "").strip()
+    while body.startswith("cd ") and "&&" in body:
+        body = body.split("&&", 1)[1].strip()
+    toks = body.split()
+    return toks[0] if toks else ""
 
 
 # -------------------------------------------------------------------- text

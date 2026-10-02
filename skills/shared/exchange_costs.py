@@ -12,7 +12,12 @@ from provider-reported `usage.cost`, so exchange dollars are real charges.
 
 Usage:
   exchange_costs.py [--scope all|project] [--cwd PATH] [--since DAYS]
+                    [--after WHEN] [--before WHEN]
                     [--limit N] [--top N] [--min-repeats N] [--out PATH]
+
+--after/--before clip entries to a window (see pi_sessions.clip_entries). An
+exchange that straddles --after keeps only its in-window turns and shows up
+with no request text.
 
 Output sections:
   totals                  reconciliation against the raw spend
@@ -42,12 +47,15 @@ sys.path.insert(0, str(_SHARED))
 import pi_sessions as ps  # noqa: E402
 
 
-def collect(scope, cwd, since, limit):
+def collect(scope, cwd, since, limit, after_ms=None, before_ms=None):
     """-> list of exchange dicts enriched with session identity and position."""
     rows = []
-    for path in ps.iter_session_files(scope, cwd, since=since, limit=limit):
+    for path in ps.iter_session_files(scope, cwd, since=since, limit=limit, after_ms=after_ms):
         header, entries = ps.read_session(path)
         if header is None:
+            continue
+        entries = ps.clip_entries(entries, after_ms, before_ms)
+        if not any(e.get("type") == "message" for e in entries):
             continue
         exchanges = ps.iter_exchanges(entries)
         n = len(exchanges)
@@ -202,10 +210,13 @@ def main():
     ap.add_argument("--top", type=int, default=15)
     ap.add_argument("--min-repeats", type=int, default=2)
     ap.add_argument("--out")
+    ps.add_window_args(ap)
     args = ap.parse_args()
+    after_ms, before_ms = ps.window_from_args(args)
 
-    rows = collect(args.scope, args.cwd, args.since, args.limit)
+    rows = collect(args.scope, args.cwd, args.since, args.limit, after_ms, before_ms)
     report = summarize(rows, args.top, args.min_repeats)
+    report["meta"]["window"] = ps.window_meta(after_ms, before_ms)
     text = json.dumps(report, indent=2)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")

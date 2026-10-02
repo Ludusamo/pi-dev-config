@@ -1,6 +1,6 @@
 ---
 name: cost-analysis
-description: Analyzes spend across pi.dev sessions (~/.pi/agent/sessions) to answer "where is my money going" and "how do I spend less for the same work" - cost by model/provider/project/day, cache efficiency, context-growth and tool-output carry cost, most expensive sessions, per-file and per-comment context cost, and counterfactual repricing against the model catalog. Use when the user asks what they are spending on models, why a session was expensive, whether to switch model or provider, how to cut token/API cost, which files or comments are eating tokens, or wants a cost report or budget breakdown.
+description: Analyzes spend across pi.dev sessions (~/.pi/agent/sessions) to answer "where is my money going" and "how do I spend less for the same work" - cost by model/provider/project/day, cache efficiency, context-growth and tool-output carry cost, most expensive sessions, per-file and per-comment context cost, and counterfactual repricing against the model catalog. Use when the user asks what they are spending on models, why a session was expensive, whether to switch model or provider, how to cut token/API cost, which files or comments are eating tokens, or wants a cost report or budget breakdown. Periodic checks are saved to ~/notes/pi-usage, cover only the time since the last report, and track whether changes the user made helped.
 ---
 
 # Cost Analysis
@@ -29,7 +29,38 @@ counterfactuals and cache-carry estimates. Local providers (ollama) report
 zero cost and are counted separately as "free turns" so they don't dilute
 paid averages.
 
-## Step 1: Run the extractor
+## Step 0: Use the ledger (default for any "how am I doing" check)
+
+Reports are kept in `~/notes/pi-usage/` (override with `$PI_USAGE_DIR`), one dir per check.
+Each check covers only what happened **since the previous report**, so nothing is analyzed twice.
+Unless the user asks for a specific window or a one-off question ("why was session X expensive?"), start here instead of Step 1:
+
+```bash
+L="python3 $HOME/.pi/agent/skills/shared/usage_ledger.py"
+$L window                 # where the next report starts and ends - tell the user
+$L run                    # runs every extractor for that window, writes <root>/<date>/
+```
+
+`run` writes `data/` (cost, cost_sessions, sessions, exchanges, content, activity), `metrics.json` (comparable headline metrics), and a `report.md` skeleton.
+The skeleton already contains the headline table, the comparison with the previous report, and every open change from the changes log with its watched metrics before and after.
+Then:
+
+1. Read `data/cost.json`, `data/exchanges.json`, and `data/activity.txt`. Interpret them with Step 2 below.
+2. Sort `data/activity.txt` into categories of work. Write a `{session_id prefix as printed in activity.txt: category}` JSON map and run `$L categorize --dir <dir> --map <map>`. That fills the category table in `report.md` and saves it to `metrics.json` so later reports can compare.
+   Reuse the category names from the previous report's `data/categories.json` where they still fit.
+3. Judge each open change in "Changes under evaluation" against its numbers, then record the result with `$L change set <ID> --status kept|reverted|applied --note "..."`.
+   One window is often not enough evidence. Leave it `applied` and say so rather than calling it early.
+4. Replace every `TODO` in `report.md` with findings and takeaways.
+5. For every takeaway the user acts on (or agrees to try), log it with `$L change add --title "..." --metric <key>=down --status applied`, so the next report checks whether it worked.
+   Use `--status proposed` for recommendations not acted on yet. Pick metrics that the change should move; `$L change add --metric x` lists the valid keys.
+
+Rules:
+- Windows are half-open `(after, before]` and clip *entries*, not files. A session that spans two reports is split between them.
+- Window lengths differ, so compare per-hour, per-turn, per-active-day and share metrics, not raw totals. `compare` marks totals with no direction for this reason.
+- Never hand-edit `changes.jsonl` or `CHANGES.md`; go through `change add` / `change set` so the baseline report is recorded.
+- If `run` says the window is empty, report that and stop.
+
+## Step 1: Run the extractor (one-off analysis)
 
 ```bash
 python3 scripts/extract_costs.py --scope all --no-per-session --out /tmp/cost.json
@@ -38,6 +69,7 @@ python3 scripts/extract_costs.py --scope all --no-per-session --out /tmp/cost.js
 Flags:
 - `--scope {all,project}` (default `all`; `project` uses `--cwd PATH`)
 - `--since DAYS` / `--limit N` - narrow the window
+- `--after WHEN` / `--before WHEN` - exact window (ISO or YYYY-MM-DD), clipping entries. All four extractors accept these.
 - `--top N` - length of ranked lists (default 15)
 - `--reprice "opus,gpt-5,gemini"` - restrict counterfactual candidates to matching models
 - `--no-per-session` - aggregates only; **start here**, it is small

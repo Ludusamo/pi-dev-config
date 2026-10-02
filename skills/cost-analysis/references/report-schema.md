@@ -10,6 +10,7 @@ per 1M tokens.
 | `generated_at` | when the report was produced |
 | `sessions_analyzed` | session files successfully parsed |
 | `first_activity` / `last_activity` | ISO bounds of the analyzed window |
+| `window` | `{after, before}` from `--after` / `--before`; entries outside it are dropped |
 | `catalog_models_priced` | how many models had prices in models-store.json |
 
 ## `totals`
@@ -243,3 +244,17 @@ Ceilings holding everything else fixed.
 - Bash file attribution parses the command string (`cat`, `sed`, `head`, `tail`, `nl`, `bat`, `git show REV:path`, with `cd` tracking). Files printed by scripts or other commands stay under `bash`.
 - Assumes prefix caching: carried content is served from cache, new content is written.
 - Images are counted at a flat 1500 tokens.
+
+## Ledger: `metrics.json` (`shared/usage_ledger.py`)
+
+One per report dir under `~/notes/pi-usage/<date>/`.
+
+| Field | Meaning |
+|---|---|
+| `window` | `{after, before}` - the half-open window this report covers; the next report starts at `before` |
+| `previous_report` | dir name of the report this one is compared against |
+| `metrics` | comparable headline numbers; keys and better-direction are in `METRICS` in `usage_ledger.py` |
+| `model_share` | `{provider/model: share_of_spend}`; a model missing from a report had 0% share |
+| `categories` | `{category: {sessions, active_hours, cost_usd}}`, filled by `usage_ledger.py categorize` |
+
+`changes.jsonl` (one JSON object per line) holds `id`, `title`, `detail`, `metrics` (keys, optionally `=up`/`=down`), `expect`, `status` (proposed, applied, kept, reverted, dropped), `baseline_report` (the latest report when the change was applied), and `history`.

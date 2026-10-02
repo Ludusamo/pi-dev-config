@@ -12,6 +12,9 @@ Options:
                           Only used when --scope=project.
   --since DAYS            Only include sessions whose last activity is within DAYS days.
   --limit N               Only include the N most recent session files.
+  --after WHEN            Only count entries strictly after WHEN (ISO or YYYY-MM-DD).
+  --before WHEN           Only count entries at or before WHEN. Together these clip
+                          entries, not files, so consecutive windows never overlap.
   --top N                 How many rows to keep in "top N" style lists (default 15).
   --reprice MODELS        Comma-separated model ids/patterns to reprice the observed
                           token profile against (default: auto-pick from the catalog).
@@ -71,10 +74,15 @@ reprice = ps.reprice
 # per-session extraction
 # --------------------------------------------------------------------------
 
-def extract_session(path: Path, keep_turn_series: bool):
+def extract_session(path: Path, keep_turn_series: bool, after_ms=None, before_ms=None):
     header, entries = ps.read_session(path)
     if header is None:
         return None
+    windowed = after_ms is not None or before_ms is not None
+    if windowed:
+        entries = ps.clip_entries(entries, after_ms, before_ms)
+        if not any(e.get("type") == "message" for e in entries):
+            return None
 
     # Positions of assistant turns, so a tool result can be charged for the
     # turns that still have to carry it in context.
@@ -95,7 +103,8 @@ def extract_session(path: Path, keep_turn_series: bool):
     stop_reasons = collections.Counter()
     model_changes, compactions = 0, 0
     free_turns = paid_turns = 0
-    start_ms = to_epoch_ms(header.get("timestamp"))
+    # A clipped session starts at its first in-window entry, not its header.
+    start_ms = None if windowed else to_epoch_ms(header.get("timestamp"))
     end_ms = start_ms
     turn_idx = 0
 
@@ -432,6 +441,8 @@ def build_repricing(models, prices, by_id, total_cost, patterns, top_n):
             continue
         if not any(p.get(k) for k in COMPONENTS):
             continue
+        if any((p.get(k) or 0) < 0 for k in COMPONENTS):
+            continue  # routers list sentinel negative prices; they are not real offers
         c = reprice(profile, p)
         candidates.append({
             "model": f"{provider}/{mid}",
@@ -468,9 +479,11 @@ def main():
     ap.add_argument("--no-per-session", action="store_true")
     ap.add_argument("--no-turn-series", action="store_true")
     ap.add_argument("--out")
+    ps.add_window_args(ap)
     args = ap.parse_args()
+    after_ms, before_ms = ps.window_from_args(args)
 
-    files = iter_session_files(args.scope, args.cwd)
+    files = iter_session_files(args.scope, args.cwd, after_ms=after_ms)
     if args.since:
         cutoff = dt.datetime.now().timestamp() - args.since * 86400
         files = [f for f in files if f.stat().st_mtime >= cutoff]
@@ -481,12 +494,14 @@ def main():
     prices, by_id = load_catalog(Path(args.catalog))
     sessions = []
     for f in files:
-        s = extract_session(f, keep_turn_series=not args.no_turn_series)
+        s = extract_session(f, keep_turn_series=not args.no_turn_series,
+                            after_ms=after_ms, before_ms=before_ms)
         if s:
             sessions.append(s)
 
     patterns = [p.strip() for p in args.reprice.split(",") if p.strip()]
     report = build_report(sessions, prices, by_id, args.top, patterns)
+    report["meta"]["window"] = ps.window_meta(after_ms, before_ms)
 
     for s in sessions:
         s.pop("_tool_results", None)

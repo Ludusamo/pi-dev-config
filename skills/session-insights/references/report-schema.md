@@ -9,9 +9,10 @@ Output of `scripts/extract_sessions.py` is JSON with two top-level keys.
 | `total_sessions` | number of session files successfully parsed |
 | `total_cost_usd` | summed assistant-message cost across sessions |
 | `total_tokens` | summed total tokens across sessions |
-| `total_duration_hours` | sum of (last_ts - first_ts) per session, in hours |
+| `total_duration_hours` | sum of (last_ts - first_ts) per session, in hours - inflated by sessions left open |
+| `total_active_hours` | sum of per-session `active_seconds`; use this for "time spent" |
 | `tool_usage_counts` | `{toolName: count}` across all sessions |
-| `top_bash_programs` | `{program: count}` - first word of each bash command (e.g. `grep`, `sed`, `go`) |
+| `top_bash_programs` | `{program: count}` - first program of each bash command, skipping a leading `cd <dir> &&` (e.g. `grep`, `sed`, `go`) |
 | `top_bash_commands_verbatim` | `{full_command: count}` - exact repeated commands (strong redundancy signal) |
 | `most_read_files` | `{path: count}` via the `read` tool |
 | `most_written_files` | `{path: count}` via the `write` tool |
@@ -31,6 +32,7 @@ List of per-session objects:
 | `cwd` | working directory when the session was created |
 | `started` / `ended` | ISO timestamps of first/last entry |
 | `duration_seconds` | wall-clock span of the session |
+| `active_seconds` | gaps between consecutive entries, each capped at 5 minutes - time actually spent |
 | `message_count` | count of `message`-type entries |
 | `models_used` | models used within this session |
 | `stop_reasons` | assistant stop reasons (`stop`, `length`, `toolUse`, `error`, `aborted`) |
@@ -48,3 +50,5 @@ requests. Near-duplicates with different wording (e.g. "fix the failing test"
 vs "the test is still failing, please fix it") are NOT automatically grouped -
 look for these manually in `user_messages`/`bash_commands` when scanning
 per-session data, since they're often the most actionable redundancy.
+
+Top level also has `window`: `{after, before}` as passed via `--after` / `--before` (null when unbounded).

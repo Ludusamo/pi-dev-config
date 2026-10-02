@@ -13,6 +13,8 @@ Options:
   --since DAYS            Only include sessions modified in the last DAYS days.
   --limit N               Only include the N most recent session files.
   --max-text-len N        Truncate long text fields to N chars (default 400).
+  --after WHEN            Only count entries strictly after WHEN (ISO or YYYY-MM-DD).
+  --before WHEN           Only count entries at or before WHEN.
   --out PATH              Write JSON report to PATH instead of stdout.
   --no-per-session        Omit the detailed per-session array, aggregates only.
 
@@ -57,9 +59,7 @@ def summarize_tool_args(name, args):
     if name == "bash" or name == "Bash":
         cmd = args.get("command", "")
         out["command"] = truncate(cmd, 200)
-        # first token = the actual program invoked
-        toks = cmd.strip().split()
-        out["program"] = toks[0] if toks else ""
+        out["program"] = ps.bash_program(cmd)
     elif name in ("read", "Read"):
         out["path"] = args.get("path")
     elif name in ("edit", "Edit"):
@@ -76,7 +76,7 @@ def summarize_tool_args(name, args):
     return out
 
 
-def extract_session(path: Path, max_text_len: int):
+def extract_session(path: Path, max_text_len: int, after_ms=None, before_ms=None):
     entries = []
     header = None
     with open(path, "r", encoding="utf-8") as f:
@@ -92,6 +92,11 @@ def extract_session(path: Path, max_text_len: int):
                 header = entry
                 continue
             entries.append(entry)
+
+    if after_ms is not None or before_ms is not None:
+        entries = ps.clip_entries(entries, after_ms, before_ms)
+        if not any(e.get("type") == "message" for e in entries):
+            return None
 
     if header is None:
         return None
@@ -210,6 +215,7 @@ def extract_session(path: Path, max_text_len: int):
         "started": start_ts,
         "ended": end_ts,
         "duration_seconds": duration_s,
+        "active_seconds": round(ps.active_seconds(entries), 1),
         "message_count": n_messages,
         "models_used": dict(models_used),
         "stop_reasons": dict(stop_reasons),
@@ -241,13 +247,15 @@ def build_aggregate(sessions):
     total_tokens = 0.0
     total_sessions = len(sessions)
     total_duration = 0.0
+    total_active = 0.0
 
     for s in sessions:
+        total_active += s.get("active_seconds") or 0.0
         for name, cnt in s["tool_call_counts"].items():
             tool_counter[name] += cnt
         for cmd in s["bash_commands"]:
             bash_cmd_counter[cmd] += 1
-            prog = cmd.strip().split()[0] if cmd.strip() else ""
+            prog = ps.bash_program(cmd)
             if prog:
                 program_counter[prog] += 1
         for f in s["files_read"]:
@@ -282,6 +290,8 @@ def build_aggregate(sessions):
         "total_cost_usd": round(total_cost, 4),
         "total_tokens": total_tokens,
         "total_duration_hours": round(total_duration / 3600, 2) if total_duration else None,
+        # wall-clock above counts sessions left open; this caps idle gaps at 5 min
+        "total_active_hours": round(total_active / 3600, 2),
         "tool_usage_counts": dict(tool_counter.most_common()),
         "top_bash_programs": dict(program_counter.most_common(30)),
         "top_bash_commands_verbatim": dict(bash_cmd_counter.most_common(30)),
@@ -303,9 +313,11 @@ def main():
     ap.add_argument("--max-text-len", type=int, default=400)
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-per-session", action="store_true")
+    ps.add_window_args(ap)
     args = ap.parse_args()
+    after_ms, before_ms = ps.window_from_args(args)
 
-    files = list(iter_session_files(args.scope, args.cwd))
+    files = list(iter_session_files(args.scope, args.cwd, after_ms=after_ms))
 
     if args.since is not None:
         cutoff = time.time() - args.since * 86400
@@ -318,14 +330,14 @@ def main():
     sessions = []
     for f in files:
         try:
-            s = extract_session(f, args.max_text_len)
+            s = extract_session(f, args.max_text_len, after_ms, before_ms)
             if s:
                 sessions.append(s)
         except Exception as e:
             print(f"warning: failed to parse {f}: {e}", file=sys.stderr)
 
     aggregate = build_aggregate(sessions)
-    report = {"aggregate": aggregate}
+    report = {"aggregate": aggregate, "window": ps.window_meta(after_ms, before_ms)}
     if not args.no_per_session:
         report["sessions"] = sessions
 
