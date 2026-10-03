@@ -21,7 +21,7 @@ Where files live (both roots are configurable - see `references/configuration.md
 | What      | Default root         | Lifetime                                        |
 | --------- | -------------------- | ----------------------------------------------- |
 | Worktrees | `~/reviews`          | Deleted at the end of the review                |
-| Artifacts | `~/notes/pr-reviews` | Kept - notes, verdict and record, for the retro |
+| Artifacts | `~/pi-artifacts/pr-reviews` | Kept - notes, verdict and record, for the retro |
 
 ## Hard rules
 

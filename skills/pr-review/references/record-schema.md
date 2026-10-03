@@ -3,12 +3,12 @@
 One `record.json` per review, written at the end of the `review` phase into the artifact directory:
 
 ```
-~/notes/pr-reviews/<repo>/<id>/record.json
+~/pi-artifacts/pr-reviews/<repo>/<id>/record.json
 ```
 
 There is no separate ledger file.
 The ledger is the glob `<artifact_root>/*/*/record.json`, so it cannot drift out of sync with the artifacts it describes.
-The artifact root is `PR_REVIEW_ARTIFACT_ROOT`, defaulting to `~/notes/pr-reviews`.
+The artifact root is `PR_REVIEW_ARTIFACT_ROOT`, defaulting to `~/pi-artifacts/pr-reviews`.
 
 ## Shape
 

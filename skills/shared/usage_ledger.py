@@ -3,7 +3,7 @@
 check covers only what happened since the last one, and changes you make can be
 judged against the next check.
 
-Layout (root = $PI_USAGE_DIR or ~/notes/pi-usage):
+Layout (root = $PI_USAGE_DIR or ~/pi-artifacts/pi-usage):
 
   <root>/<YYYY-MM-DD>/report.md        the written report (skeleton generated, LLM fills it)
   <root>/<YYYY-MM-DD>/metrics.json     window + comparable headline metrics
@@ -60,7 +60,7 @@ INSIGHTS_SCRIPT = SKILLS / "session-insights" / "scripts" / "extract_sessions.py
 EXCHANGE_SCRIPT = _SHARED / "exchange_costs.py"
 CONTENT_SCRIPT = _SHARED / "content_costs.py"
 
-ROOT = Path(os.environ.get("PI_USAGE_DIR") or Path.home() / "notes" / "pi-usage")
+ROOT = Path(os.environ.get("PI_USAGE_DIR") or Path.home() / "pi-artifacts" / "pi-usage")
 LONG_SESSION_TURNS = 100
 BIG_CONTEXT_TOKENS = 150_000
 OPEN_STATUSES = ("proposed", "applied")

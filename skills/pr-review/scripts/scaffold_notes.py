@@ -18,7 +18,7 @@ The quick tier skips notes.md altogether unless the reviewer asks for it.
 
 Usage:
     scaffold_notes.py --id STONE-1494                  # resolve via config
-    scaffold_notes.py --artifacts ~/notes/pr-reviews/cod-backend/STONE-1494
+    scaffold_notes.py --artifacts ~/pi-artifacts/pr-reviews/cod-backend/STONE-1494
     scaffold_notes.py --id STONE-1494 --files          # with a heading per file
     scaffold_notes.py --id STONE-1494 --update --range <since_last_pass>
                                                        # list what changed again

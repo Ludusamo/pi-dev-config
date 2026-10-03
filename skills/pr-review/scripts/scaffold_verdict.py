@@ -20,7 +20,7 @@ Usage:
     scaffold_verdict.py --id STONE-1494 --no-scan        # prep
     scaffold_verdict.py --id STONE-1494 --add-scan       # review: reveal the scan
     scaffold_verdict.py --id STONE-1494                  # all at once
-    scaffold_verdict.py --artifacts ~/notes/pr-reviews/cod-backend/STONE-1494
+    scaffold_verdict.py --artifacts ~/pi-artifacts/pr-reviews/cod-backend/STONE-1494
     scaffold_verdict.py --id STONE-1494 --force          # overwrite existing
 """
 import argparse

@@ -4,7 +4,7 @@
 Two roots:
 
     worktree_root   bulky, disposable git checkouts     default ~/reviews
-    artifact_root   small, durable guides and records   default ~/notes/pr-reviews
+    artifact_root   small, durable guides and records   default ~/pi-artifacts/pr-reviews
 
 They are separate because they have opposite lifetimes. Worktrees are deleted
 after a review; artifacts and records must outlive the branch, since the retro
@@ -24,7 +24,7 @@ Config file (JSON, all keys optional):
     %APPDATA%\\pr-review\\config.json          Windows
 
     {
-      "artifact_root": "~/notes/pr-reviews",
+      "artifact_root": "~/pi-artifacts/pr-reviews",
       "worktree_root": "~/reviews",
       "autocommit": false,
       "repos": {
@@ -49,7 +49,7 @@ from pathlib import Path
 
 DEFAULTS = {
     "worktree_root": Path.home() / "reviews",
-    "artifact_root": Path.home() / "notes" / "pr-reviews",
+    "artifact_root": Path.home() / "pi-artifacts" / "pr-reviews",
     "autocommit": False,
 }
 

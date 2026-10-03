@@ -247,7 +247,7 @@ Ceilings holding everything else fixed.
 
 ## Ledger: `metrics.json` (`shared/usage_ledger.py`)
 
-One per report dir under `~/notes/pi-usage/<date>/`.
+One per report dir under `~/pi-artifacts/pi-usage/<date>/`.
 
 | Field | Meaning |
 |---|---|

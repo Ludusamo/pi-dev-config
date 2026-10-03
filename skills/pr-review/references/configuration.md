@@ -7,7 +7,7 @@ Where reviews are stored, and how to change it.
 | Root            | Holds                                  | Lifetime                                  | Default              |
 | --------------- | -------------------------------------- | ----------------------------------------- | -------------------- |
 | `worktree_root` | base/head git checkouts                | Deleted after the review                  | `~/reviews`          |
-| `artifact_root` | guides, scans, verdicts, `record.json` | Permanent - the retro reads across months | `~/notes/pr-reviews` |
+| `artifact_root` | guides, scans, verdicts, `record.json` | Permanent - the retro reads across months | `~/pi-artifacts/pr-reviews` |
 
 They are separate on purpose.
 Worktrees are bulky and disposable; artifacts are small and durable.
@@ -36,7 +36,7 @@ Run it first whenever artifacts end up somewhere unexpected.
 ```json
 {
   "worktree_root": "~/reviews",
-  "artifact_root": "~/notes/pr-reviews",
+  "artifact_root": "~/pi-artifacts/pr-reviews",
   "autocommit": false,
   "repos": {
     "cod-backend": {

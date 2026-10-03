@@ -45,7 +45,7 @@ Subagent runs use `--no-session`, so their turns never appear in a session file.
 Their cost is only recorded in the parent's `subagent` tool result, and the cost-analysis extractors read it from there (`subagents` in their report).
 
 Four user-scope agents live in `agents/`.
-Models were picked by benchmarking candidates on tasks with known answers (2026-10-02, details in `~/notes/pi-usage/agent-bench-2026-10-02.md`):
+Models were picked by benchmarking candidates on tasks with known answers (2026-10-02, details in `~/pi-artifacts/pi-usage/agent-bench-2026-10-02.md`):
 
 | Agent    | Model                                | Tools                    | Why                                                                                               |
 |----------|--------------------------------------|--------------------------|---------------------------------------------------------------------------------------------------|
@@ -101,7 +101,7 @@ If the `agent-modes` extension isn't loaded (so `/mode` isn't available), `/tour
 `usage-ledger.ts` adds `/usage`, for marking the recommendations from pi usage checks without knowing where the ledger script lives.
 `/usage` opens a picker: choose a change, then what happened (done, done since a date, keep, revert, drop) and an optional note.
 Shortcuts: `/usage done C2 [note]`, `/usage keep|revert|drop C1 [note]`, `/usage list [all]`, and `/usage check` to have the agent run a usage check now.
-It wraps `skills/shared/usage_ledger.py change list/set`; the log itself is `~/notes/pi-usage/changes.jsonl`.
+It wraps `skills/shared/usage_ledger.py change list/set`; the log itself is `~/pi-artifacts/pi-usage/changes.jsonl`.
 You rarely need it: the agent marks a change applied when it implements one, and each usage check first looks for evidence of proposed changes and asks about the ones it cannot see.
 
 ## Skills

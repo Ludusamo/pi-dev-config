@@ -2,7 +2,7 @@
  * /usage - mark pi usage-report recommendations as done, kept, reverted or dropped,
  * without knowing where the ledger script lives.
  *
- * The changes log (~/notes/pi-usage/changes.jsonl) is owned by
+ * The changes log (~/pi-artifacts/pi-usage/changes.jsonl) is owned by
  * skills/shared/usage_ledger.py; this command only wraps its `change list/set`.
  *
  *   /usage                      pick a change, then what happened to it

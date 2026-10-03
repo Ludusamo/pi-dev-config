@@ -1,6 +1,6 @@
 ---
 name: cost-analysis
-description: Analyzes spend across pi.dev sessions (~/.pi/agent/sessions) to answer "where is my money going" and "how do I spend less for the same work" - cost by model/provider/project/day, cache efficiency, context-growth and tool-output carry cost, most expensive sessions, per-file and per-comment context cost, and counterfactual repricing against the model catalog. Use when the user asks what they are spending on models, why a session was expensive, whether to switch model or provider, how to cut token/API cost, which files or comments are eating tokens, or wants a cost report or budget breakdown. Periodic checks are saved to ~/notes/pi-usage, cover only the time since the last report, and track whether changes the user made helped.
+description: Analyzes spend across pi.dev sessions (~/.pi/agent/sessions) to answer "where is my money going" and "how do I spend less for the same work" - cost by model/provider/project/day, cache efficiency, context-growth and tool-output carry cost, most expensive sessions, per-file and per-comment context cost, and counterfactual repricing against the model catalog. Use when the user asks what they are spending on models, why a session was expensive, whether to switch model or provider, how to cut token/API cost, which files or comments are eating tokens, or wants a cost report or budget breakdown. Periodic checks are saved to ~/pi-artifacts/pi-usage, cover only the time since the last report, and track whether changes the user made helped.
 ---
 
 # Cost Analysis
@@ -31,7 +31,7 @@ paid averages.
 
 ## Step 0: Use the ledger (default for any "how am I doing" check)
 
-Reports are kept in `~/notes/pi-usage/` (override with `$PI_USAGE_DIR`), one dir per check.
+Reports are kept in `~/pi-artifacts/pi-usage/` (override with `$PI_USAGE_DIR`), one dir per check.
 Each check covers only what happened **since the previous report**, so nothing is analyzed twice.
 Unless the user asks for a specific window or a one-off question ("why was session X expensive?"), start here instead of Step 1:
 

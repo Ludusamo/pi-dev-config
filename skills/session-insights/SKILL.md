@@ -1,6 +1,6 @@
 ---
 name: session-insights
-description: Analyzes past pi.dev session transcripts (~/.pi/agent/sessions) to surface behavioral trends and patterns in how the user interacts with the LLM - repeated requests, redundant tool-call patterns, recurring bash commands, frequently touched files, common errors, and wasted effort. Use when the user asks to review their pi sessions, find redundancy in how they work with the agent, get usage stats/trends, or wants recommendations (skills/aliases/extensions/prompt habits) to reduce repetitive work. Periodic "how have I been using pi" checks go through the cost-analysis ledger in ~/notes/pi-usage so nothing is re-analyzed.
+description: Analyzes past pi.dev session transcripts (~/.pi/agent/sessions) to surface behavioral trends and patterns in how the user interacts with the LLM - repeated requests, redundant tool-call patterns, recurring bash commands, frequently touched files, common errors, and wasted effort. Use when the user asks to review their pi sessions, find redundancy in how they work with the agent, get usage stats/trends, or wants recommendations (skills/aliases/extensions/prompt habits) to reduce repetitive work. Periodic "how have I been using pi" checks go through the cost-analysis ledger in ~/pi-artifacts/pi-usage so nothing is re-analyzed.
 ---
 
 # Session Insights
@@ -13,7 +13,7 @@ cheap); the LLM does the qualitative interpretation on top of that data.
 ## Step 0: Periodic checks go through the ledger
 
 If the user wants a periodic review ("how have I been using pi", "what have I spent time on", "check my sessions again"), follow **Step 0 of the cost-analysis skill** (`~/.pi/agent/skills/cost-analysis/SKILL.md`) instead of Steps 1-2 here.
-It runs this extractor and the cost extractors for the window since the last saved report in `~/notes/pi-usage/`, so nothing is re-analyzed.
+It runs this extractor and the cost extractors for the window since the last saved report in `~/pi-artifacts/pi-usage/`, so nothing is re-analyzed.
 It also tracks the changes the user made and whether they helped.
 This skill's output for that window is in `<report dir>/data/sessions.json`. Use `references/analysis-guide.md` to interpret it, and put the behavioral findings into the same `report.md`.
 
