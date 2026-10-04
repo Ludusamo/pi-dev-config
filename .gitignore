@@ -1,1 +1,8 @@
+*
+!/.gitignore
+!/skills/
+!/skills/**
+!/extensions/
+!/extensions/**
 __pycache__/
+*.pyc
