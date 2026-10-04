@@ -1,4 +1,8 @@
 *
+
+# Agents are machine-local because runtimes and model availability vary by host.
+/agents/
+
 !/.gitignore
 !/skills/
 !/skills/**
