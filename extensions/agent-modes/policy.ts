@@ -53,13 +53,35 @@ export const MODES: Record<string, AgentMode> = {
     name: "pair",
     label: "Pair Coding",
     description:
-      "Design and discuss together. Never edit files or commit/push without explicit user permission.",
+      "Design-first pairing: the user drives design decisions and the agent helps think. " +
+      "Built-in edits and git writes stay blocked; confirmed changes are applied via a worker " +
+      "subagent, a mode switch, or by the user.",
     editPolicy: "blocked",
     gitWritePolicy: "blocked",
     systemPromptSnippet:
-      "You are in PAIR CODING mode. Spend time designing with the user, offering " +
-      "suggestions, and proposing code snippets. Do not edit or write files, and do " +
-      "not commit or push, unless the user explicitly asks you to.",
+      "You are in PAIR CODING mode. The user is the driver of design decisions; you help them think, you do not decide for them.\n" +
+      "- When a new problem or subproblem comes up, ask for the user's approach first, then react to it " +
+      "(gaps, alternatives, trade-offs) instead of presenting your own solution up front.\n" +
+      "- Explain concepts directly when asked or when they unblock a decision, but leave consequential " +
+      "decisions (architecture, interfaces, data shapes, trade-offs) open for the user to make.\n" +
+      "- Work through three checkpoints and name the one you are at: Understanding (the problem and " +
+      "constraints are agreed), Design (the approach is agreed), Implementation (the agreed design is " +
+      "being turned into code). Do not move to the next checkpoint without the user's explicit confirmation.\n" +
+      "- Before design confirmation, short illustrative snippets (roughly 15 lines or fewer each) are fine " +
+      "to make an idea concrete. Do not write full implementation code until the user has explicitly " +
+      "confirmed the design.\n" +
+      "- After confirmation, you may show full code in chat for the user to review.\n" +
+      "- If there are details the user did not decide, list them as a table with the columns " +
+      "Detail | Proposal | Why it matters, and let the user accept or change each one.\n" +
+      "- Built-in edit/write and git commit/push are blocked in this mode, intentionally. To apply a " +
+      "confirmed change, either delegate it to a subagent (once the user agrees), or tell the " +
+      "user they can switch with /mode guarded --session or /mode auto --session, or make the edit themselves.\n" +
+      "- Never work around the block: no bash redirects, sed -i, tee, heredocs, git apply, scripted " +
+      "writes, or similar tricks to modify files or history.\n" +
+      "- Adaptive preferences: follow any saved pair preferences shown below. The user's current " +
+      "instructions always override them. When you notice a stable collaboration-style preference " +
+      "(e.g. how much explanation, snippet size, how to present options), propose saving it with the " +
+      "pair_preference tool, which asks the user to confirm. Never save task-specific or one-off requests.",
   },
   guarded: {
     name: "guarded",
@@ -212,4 +234,129 @@ export function parseModeArgs(args: string): { name: string; persist: boolean; e
   const persist = !tokens.includes(SESSION_ONLY_FLAG);
   const name = (tokens.find((t) => !t.startsWith("--")) ?? "").toLowerCase();
   return { name, persist };
+}
+
+/** customType of the hidden one-turn intent hint message injected by index.ts. */
+export const INTENT_HINT_CUSTOM_TYPE = "agent-intent-hint";
+
+export type SubagentIntent = "devils-advocate" | "worker";
+
+const DELEGATION_GUIDANCE_MODES = new Set(["pair", "guarded", "auto"]);
+
+/**
+ * Optional delegation suggestions for the non-coordinator working modes, limited to agents that
+ * actually exist. Empty for other modes (coordinator already delegates; tour is read-only teaching).
+ */
+export function buildDelegationGuidance(modeName: string, available: readonly string[]): string {
+  if (!DELEGATION_GUIDANCE_MODES.has(modeName)) return "";
+  const has = (name: string) => available.includes(name);
+  const lines: string[] = [];
+  if (modeName === "pair" && has("worker")) {
+    lines.push(
+      "- To apply a design the user has confirmed, offer to dispatch the `worker` subagent with the agreed design; only dispatch after the user says yes.",
+    );
+  }
+  if (has("scout")) {
+    lines.push(
+      "- For broad read-only lookups (finding where something lives, tracing usages), consider the `scout` subagent instead of searching yourself.",
+    );
+  }
+  if (has("reviewer")) {
+    lines.push(
+      "- For a second opinion on a non-trivial diff or design, consider the `reviewer` subagent.",
+    );
+  }
+  if (lines.length === 0) return "";
+  if (modeName === "pair") {
+    lines.push(
+      "- Subagents do not override this mode and must not edit files until the user has confirmed the design and asked for it to be applied.",
+    );
+  }
+  return `Optional subagent delegation (the subagent tool):\n${lines.join("\n")}`;
+}
+
+/** A negation word within a few words before a trigger, i.e. one that negates the trigger itself. */
+const NEGATION_BEFORE =
+  /\b(?:don['’]?t|do not|dont|never|no need(?: for| to)?|no|without|not|instead of|rather than)\b(?:\s+[\w'’-]+){0,3}\s*$/i;
+
+// Requests must be phrased as an instruction at the start of a clause, so prompts that merely
+// mention workers or devil's advocates ("what does the worker agent do", "fix the devils-advocate
+// prompt") and possessives ("the worker's output") do not fire.
+const REQUEST_LEAD =
+  "^\\s*(?:(?:please|just|now|then|and|also|so|ok|okay)\\s+|(?:let['’]?s|let us)\\s+|(?:(?:can|could|would|will)\\s+you|you\\s+(?:should|can|could|must)|i\\s+(?:want|need|['’]?d\\s+like)\\s+you\\s+to)\\s+(?:please\\s+)?)*";
+const DEVILS_ADVOCATE = "devil['’]?s[\\s-]+advocate\\b";
+const DEVILS_ADVOCATE_PATTERNS = [
+  new RegExp(
+    REQUEST_LEAD + "(?:play|be|act\\s+as|give\\s+me|get\\s+me|use|have|do)\\s+(?:a\\s+|an\\s+|the\\s+|some\\s+)?" + DEVILS_ADVOCATE,
+    "i",
+  ),
+  new RegExp("^\\s*(?:please\\s+)?i\\s+(?:want|need|would\\s+like|['’]?d\\s+like)\\s+(?:a|an|some)\\s+" + DEVILS_ADVOCATE, "i"),
+  new RegExp(REQUEST_LEAD + "(?:poke\\s+holes|argue\\s+against)\\b", "i"),
+];
+
+const WORKER_NOUN = "(?:a\\s+|the\\s+|one\\s+)?(?:subagent\\s+)?worker(?:\\s+(?:subagent|agent))?(?![\\w'’-])(?!\\s+(?:thread|process|pool|queue|for\\s+each|per))";
+// "send" is common in code instructions ("send messages to the worker"), so it needs an explicit
+// task-like object; dispatch/delegate/hand off are unambiguous.
+const SEND_OBJECT = "(?:this|that|it|the\\s+(?:task|job|work|change|changes|refactor|fix|implementation))";
+// use/have/launch/spawn are ordinary coding verbs ("have the worker retry"), so they need the noun
+// to say subagent/agent explicitly, or name the `worker` agent in backticks.
+const EXPLICIT_WORKER_NOUN =
+  "(?:a\\s+|the\\s+|one\\s+)?(?:`worker`|(?:subagent\\s+worker|worker\\s+(?:subagent|agent))(?![\\w'’-]))";
+const WORKER_PATTERNS = [
+  new RegExp(REQUEST_LEAD + "(?:use|have|launch|spawn)\\s+" + EXPLICIT_WORKER_NOUN, "i"),
+  new RegExp(
+    REQUEST_LEAD + "(?:dispatch|delegate|hand(?:\\s+(?:it|this|that))?\\s+off)\\b[^,;]*\\bto\\s+" + WORKER_NOUN,
+    "i",
+  ),
+  new RegExp(REQUEST_LEAD + "send\\s+" + SEND_OBJECT + "\\s+to\\s+" + WORKER_NOUN, "i"),
+];
+
+function triggers(clause: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((p) => {
+    const m = p.exec(clause);
+    return m !== null && !NEGATION_BEFORE.test(clause.slice(0, m.index)) && !NEGATION_BEFORE.test(m[0]);
+  });
+}
+
+/**
+ * Explicit subagent requests found in a user prompt. Works clause by clause, and a clause is
+ * suppressed only when a negation sits just before the trigger ("don't use a worker", "no
+ * devil's advocate needed"), not when it merely appears elsewhere in the clause. Returns a
+ * de-duplicated, fixed order.
+ */
+export function detectSubagentIntents(prompt: string): SubagentIntent[] {
+  const found = new Set<SubagentIntent>();
+  const clauses = prompt.split(/[.!?;,\n]+/);
+  for (const clause of clauses) {
+    if (triggers(clause, DEVILS_ADVOCATE_PATTERNS)) found.add("devils-advocate");
+    if (triggers(clause, WORKER_PATTERNS)) found.add("worker");
+  }
+  return (["devils-advocate", "worker"] as const).filter((i) => found.has(i));
+}
+
+/**
+ * One-turn hint for explicitly requested subagents. Drops agents that are not available, and
+ * worker in tour mode (read-only). Empty string when nothing remains.
+ */
+export function buildIntentHint(
+  intents: readonly SubagentIntent[],
+  modeName: string,
+  available: readonly string[],
+): string {
+  const lines: string[] = [];
+  if (intents.includes("devils-advocate") && available.includes("devils-advocate")) {
+    lines.push(
+      "- The user asked for a devil's advocate: dispatch the `devils-advocate` subagent to challenge the current plan or conclusion, then report its objections.",
+    );
+  }
+  if (intents.includes("worker") && modeName !== TOUR_MODE_NAME && available.includes("worker")) {
+    const planner = available.includes("planner")
+      ? " If the task is not yet well specified, consider the `planner` subagent first."
+      : "";
+    lines.push(
+      `- The user asked for a worker: dispatch the \`worker\` subagent with a self-contained task.${planner}`,
+    );
+  }
+  if (lines.length === 0) return "";
+  return `Hidden hint for this turn only (the user did not see this):\n${lines.join("\n")}`;
 }

@@ -9,11 +9,31 @@ The `agent-modes` extension bundles the policies that govern how autonomously th
 It is configured through the `/mode` command; add `--session` (e.g. `/mode tour --session`) to switch for the current session only, without changing the persisted default used by future sessions/projects.
 
 Five modes are built in.
-Pair mode blocks file edits and git writes so the agent designs and discusses with the user rather than acting unilaterally.
+Pair mode is design-first: the user drives design decisions and the agent helps them think rather than deciding for them.
+The agent asks for the user's approach first on each new problem, explains concepts directly, and leaves consequential decisions open.
+Work moves through three checkpoints, Understanding, Design and Implementation, and only advances with the user's explicit confirmation.
+Before design confirmation only short illustrative snippets (roughly 15 lines or fewer each) are allowed, and full implementation code waits until the design is confirmed, after which it may be shown in chat for review.
+Details the user did not decide are listed as a Detail | Proposal | Why it matters table.
+Pair mode blocks built-in edit/write and git writes, and the agent must not work around that with bash redirects, `sed -i`, `tee`, heredocs, `git apply` and the like.
+Confirmed changes are applied by delegating to the `worker` subagent (after the user says yes), by the user switching with `/mode guarded --session` or `/mode auto --session`, or by the user editing themselves.
 Guarded mode sits between pair and auto: the agent can investigate and plan autonomously, but edit/write tool calls and git write commands require confirmation first.
 Auto mode is fully autonomous, with edits and git writes unrestricted.
 Coordinator mode also blocks edits and git writes for the main agent directly, and instructs it to delegate implementation work to subagents, escalate any subagent questions to the user instead of guessing, and default to self-doubt over confidently asserting an answer itself.
 Tour mode also blocks edits and git writes, and is meant to be paired with the `codebase-tour` extension: it guides the agent to run a read-only, mixed Socratic/explain-first walkthrough of the codebase using that extension's tools, instead of narrating a tour from memory with no way to resume it later.
+
+In pair, guarded and auto modes, the injected snippet also suggests the `scout` subagent for broad read-only lookups and the `reviewer` subagent for a second opinion, but only for agents that actually exist.
+In pair mode it also offers to dispatch the `worker` subagent with the agreed design once the user has confirmed it, and only dispatches after the user says yes.
+In pair mode it adds that subagents do not override the mode, so none should edit files until the user has confirmed the design and asked for it to be applied.
+When a prompt explicitly asks for a devil's advocate (or to poke holes or argue against something) or to dispatch a worker, a hidden hint for that one turn suggests the matching subagent.
+Worker requests must be phrased as an instruction naming the subagent ("use a worker subagent", "use the `worker` agent") or as delegation ("dispatch this to a worker"), so questions, mentions, or ordinary coding requests about workers ("have the worker retry") do not fire.
+A request is ignored only when a negation sits right before the trigger ("don't use a worker", "no devil's advocate needed"), and the worker hint is dropped in tour mode.
+Neither the suggestions nor the hints are injected inside subagents.
+
+Pair mode adapts to the user through saved pair preferences, which are global across all projects and persist across sessions in `~/.pi/agent/agent-modes-pair-preferences.json`.
+Saved preferences (at most 20, each at most 200 characters) are injected into the pair prompt, and the user's current instructions always override them.
+The agent can propose a stable collaboration-style preference with the `pair_preference` tool, which works only in pair mode and always asks the user to confirm, so nothing is saved without an interactive UI or if declined.
+The `/pair-prefs` command manages them directly with `list`, `add <text>`, `remove <id>` and `clear`.
+Typed `list`, `add` and `remove` need no confirmation, while `clear` asks first.
 
 In coordinator mode, the extension also renders a live status widget tracking delegated subagent tasks (running/done/failed, with elapsed time), built on the same tool-call data the `subagent` extension's session store uses.
 

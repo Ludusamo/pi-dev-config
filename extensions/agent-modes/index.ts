@@ -4,10 +4,15 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Type } from "typebox";
 import { discoverAgents } from "../subagent/agents.ts";
 import {
+  buildDelegationGuidance,
+  buildIntentHint,
   COORDINATOR_BASE_SNIPPET,
   DEFAULT_MODE,
+  detectSubagentIntents,
+  INTENT_HINT_CUSTOM_TYPE,
   MODES,
   PARENT_MODE_ENV,
   parseModeArgs,
@@ -15,6 +20,17 @@ import {
   subagentMode,
   type AgentMode,
 } from "./policy.ts";
+import {
+  addPairPreference,
+  buildPairPreferencesSnippet,
+  loadPairPreferences,
+  newPreferenceId,
+  PAIR_PREFERENCES_FILE,
+  parsePairPrefsArgs,
+  removePairPreference,
+  savePairPreferences,
+  type PairPreference,
+} from "./preferences.ts";
 
 // Spawned as a subagent by the subagent extension (which sets PI_SUBAGENT=1 on the child).
 const IS_SUBAGENT = process.env.PI_SUBAGENT === "1";
@@ -162,6 +178,14 @@ function buildAgentListSnippet(cwd: string): string {
   );
 }
 
+function availableAgentNames(cwd: string): string[] {
+  try {
+    return discoverAgents(cwd, "user").agents.map((a) => a.name);
+  } catch {
+    return [];
+  }
+}
+
 function buildCoordinatorSnippet(cwd: string): string {
   return `${COORDINATOR_BASE_SNIPPET}\n\n${buildAgentListSnippet(cwd)}`;
 }
@@ -198,6 +222,13 @@ export default function (pi: ExtensionAPI) {
   // recognize it as current even though it's recomputed per-turn rather than
   // being a fixed string like the other modes' snippets.
   let lastCoordinatorSnippet: string | undefined;
+  // Non-coordinator snippet (static snippet + optional delegation guidance) injected on the most recent turn.
+  let lastModeSnippet: string | undefined;
+  // Intent hint injected on the most recent turn; older ones are stripped from context.
+  let lastIntentHint: string | undefined;
+
+  // Global saved pair preferences, loaded at session start and refreshed before every change.
+  let pairPreferences: PairPreference[] = [];
 
   let delegatedTasks: DelegatedTask[] = [];
   // Context from the most recent event, reused by the tick timer below since
@@ -283,6 +314,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     currentMode = mode;
+    lastModeSnippet = undefined;
     // Children spawned by the subagent extension inherit process.env, so this tells them
     // which mode they were dispatched from (see subagentMode in policy.ts).
     process.env[PARENT_MODE_ENV] = mode.name;
@@ -302,6 +334,7 @@ export default function (pi: ExtensionAPI) {
       updateStatus(ctx);
       return;
     }
+    pairPreferences = loadPairPreferences();
     const name = await loadLastMode();
     currentMode = MODES[name];
     process.env[PARENT_MODE_ENV] = currentMode.name;
@@ -386,6 +419,130 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  if (!IS_SUBAGENT) {
+    pi.registerTool({
+      name: "pair_preference",
+      label: "Pair Preference",
+      description:
+        "Save or remove a stable pair-mode collaboration-style preference (global, persists across sessions). " +
+        "Only works in pair mode and always asks the user to confirm; nothing is saved without an interactive UI or if declined.",
+      promptGuidelines: [
+        "Use pair_preference only for stable collaboration-style preferences, never task-specific or one-off requests.",
+      ],
+      parameters: Type.Object({
+        action: Type.Union([Type.Literal("add"), Type.Literal("remove")], { description: "add or remove" }),
+        text: Type.Optional(Type.String({ description: "Preference text (for add), at most 200 characters" })),
+        id: Type.Optional(Type.String({ description: "Preference id (for remove)" })),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
+        if (currentMode.name !== "pair") return fail("pair_preference only works in pair mode.");
+        if (!ctx.hasUI) return fail("No interactive UI available, so nothing was saved.");
+        const initial = loadPairPreferences();
+        let proposed: PairPreference | undefined;
+        let prompt: string;
+        let done: string;
+        if (params.action === "add") {
+          const result = addPairPreference(initial, params.text ?? "", new Date(), newPreferenceId());
+          if ("error" in result) return fail(result.error);
+          if (result.prefs.length === initial.length) {
+            pairPreferences = initial;
+            return { content: [{ type: "text" as const, text: "Preference already saved." }], details: {} };
+          }
+          proposed = result.prefs[result.prefs.length - 1];
+          prompt = `Save this pair preference?\n\n${proposed.text}`;
+          done = "Saved preference.";
+        } else {
+          const result = removePairPreference(initial, params.id ?? "");
+          if (!result.removed) return fail(`No saved preference with id ${params.id ?? ""}.`);
+          prompt = `Remove this pair preference?\n\n${result.removed.text}`;
+          done = "Removed preference.";
+        }
+        const ok = await ctx.ui.confirm("Pair preference", prompt);
+        if (!ok) return fail("The user declined; nothing was saved.");
+        // The file may have changed while the confirm dialog was open, so apply to a fresh copy.
+        const fresh = loadPairPreferences();
+        let next: PairPreference[];
+        if (params.action === "add" && proposed) {
+          const result = addPairPreference(fresh, proposed.text, new Date(proposed.createdAt), proposed.id);
+          if ("error" in result) return fail(result.error);
+          next = result.prefs;
+        } else {
+          next = removePairPreference(fresh, params.id ?? "").prefs;
+        }
+        try {
+          savePairPreferences(PAIR_PREFERENCES_FILE, next);
+        } catch (err) {
+          return fail(`Could not save preferences: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        pairPreferences = next;
+        return { content: [{ type: "text" as const, text: done }], details: { preferences: next } };
+      },
+    });
+
+    pi.registerCommand("pair-prefs", {
+      description: "Manage saved pair-mode preferences: list | add <text> | remove <id> | clear",
+      handler: async (args, ctx) => {
+        const cmd = parsePairPrefsArgs(args);
+        if (cmd.action === "invalid") {
+          ctx.ui.notify(cmd.error, "error");
+          return;
+        }
+        const current = loadPairPreferences();
+        if (cmd.action === "list") {
+          pairPreferences = current;
+          ctx.ui.notify(
+            current.length === 0
+              ? "No saved pair preferences."
+              : `Saved pair preferences:\n${current.map((p) => `[${p.id}] ${p.text}`).join("\n")}`,
+            "info",
+          );
+          return;
+        }
+        let next: PairPreference[];
+        let message: string;
+        if (cmd.action === "add") {
+          const result = addPairPreference(current, cmd.text, new Date(), newPreferenceId());
+          if ("error" in result) {
+            ctx.ui.notify(result.error, "error");
+            return;
+          }
+          next = result.prefs;
+          message = next.length === current.length ? "Preference already saved." : "Saved preference.";
+        } else if (cmd.action === "remove") {
+          const result = removePairPreference(current, cmd.id);
+          if (!result.removed) {
+            ctx.ui.notify(`No saved preference with id ${cmd.id}.`, "error");
+            return;
+          }
+          next = result.prefs;
+          message = `Removed preference [${cmd.id}].`;
+        } else {
+          if (!ctx.hasUI) {
+            ctx.ui.notify("/pair-prefs clear needs an interactive UI to confirm.", "error");
+            return;
+          }
+          if (current.length === 0) {
+            ctx.ui.notify("No saved pair preferences.", "info");
+            return;
+          }
+          const ok = await confirmToolCall(ctx, "Clear pair preferences?", `Remove all ${current.length} saved pair preferences.`);
+          if (!ok) return;
+          next = [];
+          message = "Cleared all pair preferences.";
+        }
+        try {
+          savePairPreferences(PAIR_PREFERENCES_FILE, next);
+        } catch (err) {
+          ctx.ui.notify(`Could not save preferences: ${err instanceof Error ? err.message : String(err)}`, "error");
+          return;
+        }
+        pairPreferences = next;
+        ctx.ui.notify(message, "info");
+      },
+    });
+  }
+
   // Tool gating: block or confirm edit/write and git write commands per mode policy.
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName === "edit" || event.toolName === "write") {
@@ -393,8 +550,11 @@ export default function (pi: ExtensionAPI) {
         return {
           block: true,
           reason:
-            `${currentMode.label} mode: direct file edits are blocked. Ask the user, or delegate ` +
-            "to a subagent, to make this change.",
+            currentMode.name === "pair"
+              ? `${currentMode.label} mode: direct file edits are blocked. Ask the user to switch modes ` +
+                "(e.g. /mode guarded --session), delegate to a subagent, or let the user make the change."
+              : `${currentMode.label} mode: direct file edits are blocked. Ask the user, or delegate ` +
+                "to a subagent, to make this change.",
         };
       }
       if (currentMode.editPolicy === "confirm") {
@@ -433,13 +593,41 @@ export default function (pi: ExtensionAPI) {
   // static systemPromptSnippet) so it always reflects the current live list
   // of subagents.
   pi.on("before_agent_start", async (_event, ctx) => {
-    const content =
-      currentMode.name === "coordinator" ? buildCoordinatorSnippet(ctx.cwd) : currentMode.systemPromptSnippet;
-    if (currentMode.name === "coordinator") lastCoordinatorSnippet = content;
+    let content: string;
+    if (currentMode.name === "coordinator") {
+      content = buildCoordinatorSnippet(ctx.cwd);
+      lastCoordinatorSnippet = content;
+    } else {
+      const guidance = IS_SUBAGENT ? "" : buildDelegationGuidance(currentMode.name, availableAgentNames(ctx.cwd));
+      content = guidance ? `${currentMode.systemPromptSnippet}\n\n${guidance}` : currentMode.systemPromptSnippet;
+      if (!IS_SUBAGENT && currentMode.name === "pair") {
+        const prefs = buildPairPreferencesSnippet(pairPreferences);
+        if (prefs) content = `${content}\n\n${prefs}`;
+      }
+      lastModeSnippet = content;
+    }
     return {
       message: {
         customType: "agent-mode-context",
         content,
+        display: false,
+      },
+    };
+  });
+
+  // One-turn hint when the user explicitly asks for a devil's advocate or worker.
+  pi.on("before_agent_start", async (event, ctx) => {
+    lastIntentHint = undefined;
+    if (IS_SUBAGENT) return;
+    const intents = detectSubagentIntents(event.prompt ?? "");
+    if (intents.length === 0) return;
+    const hint = buildIntentHint(intents, currentMode.name, availableAgentNames(ctx.cwd));
+    if (!hint) return;
+    lastIntentHint = hint;
+    return {
+      message: {
+        customType: INTENT_HINT_CUSTOM_TYPE,
+        content: hint,
         display: false,
       },
     };
@@ -453,10 +641,11 @@ export default function (pi: ExtensionAPI) {
     const expected =
       currentMode.name === "coordinator"
         ? (lastCoordinatorSnippet ?? COORDINATOR_BASE_SNIPPET)
-        : currentMode.systemPromptSnippet;
+        : (lastModeSnippet ?? currentMode.systemPromptSnippet);
     return {
       messages: event.messages.filter((m) => {
         const msg = m as typeof m & { customType?: string; content?: unknown };
+        if (msg.customType === INTENT_HINT_CUSTOM_TYPE) return msg.content === lastIntentHint;
         if (msg.customType !== "agent-mode-context") return true;
         return msg.content === expected;
       }),
