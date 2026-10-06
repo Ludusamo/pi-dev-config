@@ -179,6 +179,13 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 }
 
 /** Runs an agent via the `pi` CLI (JSON mode, isolated context). */
+const AGENTS_MD_NOTE =
+	"Before starting, read and follow any applicable AGENTS.md instructions (in the working directory and its parents).";
+
+function withAgentsNote(task: string): string {
+	return `${AGENTS_MD_NOTE}\n\nTask: ${task}`;
+}
+
 export async function runPiAgent(opts: RunOptions): Promise<RunResult> {
 	const { agent, task, cwd, dispatchDefaults, signal, onUpdate, sessionId } = opts;
 
@@ -214,7 +221,7 @@ export async function runPiAgent(opts: RunOptions): Promise<RunResult> {
 			tmpPath = tmp.filePath;
 			args.push("--append-system-prompt", tmpPath);
 		}
-		args.push(`Task: ${task}`);
+		args.push(withAgentsNote(task));
 
 		const onLine = (line: string) => {
 			if (!line.trim()) return;
@@ -349,7 +356,7 @@ export async function runClaudeAgent(opts: RunOptions): Promise<RunResult> {
 	}
 	// `--` stops flag parsing so the prompt text is never swallowed by a
 	// preceding variadic option like --tools.
-	args.push("--", `Task: ${task}`);
+	args.push("--", withAgentsNote(task));
 
 	const onLine = (line: string) => {
 		if (!line.trim()) return;
